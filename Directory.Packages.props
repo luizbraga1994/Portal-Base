@@ -41,7 +41,7 @@
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
     <!-- FluentAssertions 7.x é a última linha Apache-2.0 (gratuita). A partir da
          8.0 exige licença comercial paga. Pin em 7.x é decisão de licenciamento. -->
-    <PackageVersion Include="FluentAssertions" Version="7.2.2" />
+    <PackageVersion Include="FluentAssertions" Version="8.11.0" />
     <PackageVersion Include="Testcontainers.MySql" Version="4.14.0" />
     <PackageVersion Include="Xunit.SkippableFact" Version="1.5.85" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
