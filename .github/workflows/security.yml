@@ -104,7 +104,7 @@ jobs:
         with:
           fetch-depth: 0        # histórico para varredura completa
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'   # nunca publicar dumps de segredo como artefato (§21/§27)
