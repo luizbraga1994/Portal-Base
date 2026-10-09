@@ -103,7 +103,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Analisadores">
-    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
   </ItemGroup>
 
 </Project>
