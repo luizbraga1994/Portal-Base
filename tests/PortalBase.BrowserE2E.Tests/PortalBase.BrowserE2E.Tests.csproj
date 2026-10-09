@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    BROWSER E2E (Prompt 54): valida o Portal Base através de um NAVEGADOR REAL (Chromium via
+    Playwright) contra o host Web executando em Kestrel real. NÃO substitui Browser E2E por teste
+    de unidade/componente. Os testes que exigem MySQL provisionado (login autenticado, tenant
+    isolation com dados, comandos) são SkippableFact e ficam classificados como BLOCKED quando a
+    infraestrutura não está disponível — nunca simulados como PASS.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- O relatório do runner (Fase 47) não deve conter cookies/segredos; nada de logs verbosos. -->
+    <PlaywrightPlatform>all</PlaywrightPlatform>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.Playwright" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PortalBase.Web\PortalBase.Web.csproj" />
+    <!-- Prompt 55: hospeda o Worker REAL no E2E integrado — não é chamada direta ao handler. -->
+    <ProjectReference Include="..\..\src\PortalBase.Worker\PortalBase.Worker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

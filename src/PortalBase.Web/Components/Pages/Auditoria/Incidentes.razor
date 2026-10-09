@@ -1,0 +1,214 @@
+@page "/auditoria/incidentes"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosIncidentes Dados
+@inject IDadosAcoesIncidentes Acoes
+@inject IAutorizacaoVisual Visual
+@inject NavigationManager Nav
+
+<PageTitle>Incidentes · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Auditoria" Titulo="Incidentes de segurança"
+            Subtitulo="Registro e acompanhamento dos incidentes de segurança da plataforma. Governança cross-tenant, autorizada e auditada no servidor. Evidências protegidas nunca são listadas.">
+    <Acoes>
+        @if (Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+        {
+            <button id="btn-novo-incidente" class="btn btn-primary btn-sm" @onclick="AbrirFormulario" disabled="@_formAberto">Registrar incidente</button>
+        }
+        <button class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button>
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="A gestão de incidentes exige a permissão de plataforma (seguranca.incidentes.gerir). A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else
+{
+    @if (_formAberto)
+    {
+        <div class="card card-pad mb-4" id="form-incidente">
+            <h3 class="card-title">Registrar incidente</h3>
+            <p class="text-sm text-muted mt-2 mtx-075">
+                Descreva o que aconteceu <strong>sem colar dados pessoais, senhas ou tokens</strong>. O incidente nasce como
+                <em>Detectado</em>; depois siga com análise, contenção, classificação de risco ao titular e encerramento.
+            </p>
+            <div class="grid grid-3 gap-3 mt-3">
+                <div class="field"><label for="inc-tipo">Tipo</label>
+                    <select id="inc-tipo" class="input" @bind="_novoTipo">
+                        @foreach (var o in OpcoesFiltro.TiposIncidente) { <option value="@o.Valor">@o.Rotulo</option> }
+                    </select></div>
+                <div class="field"><label for="inc-severidade">Severidade</label>
+                    <select id="inc-severidade" class="input" @bind="_novaSeveridade">
+                        @foreach (var o in OpcoesFiltro.SeveridadesIncidente) { <option value="@o.Valor">@o.Rotulo</option> }
+                    </select></div>
+                <div class="field"><label for="inc-contribuinte">Contribuinte afetado</label>
+                    <select id="inc-contribuinte" class="input" @bind="_novoContribuinte">
+                        <option value="">Plataforma (nenhum específico)</option>
+                        @foreach (var c in _contribuintes) { <option value="@c.Id">@c.Nome</option> }
+                    </select></div>
+            </div>
+            <div class="field mt-3"><label for="inc-titulo">Título</label>
+                <input id="inc-titulo" class="input" maxlength="200" @bind="_novoTitulo" @bind:event="oninput" /></div>
+            <div class="field mt-3"><label for="inc-descricao">Descrição</label>
+                <textarea id="inc-descricao" class="input" rows="4" maxlength="2000" @bind="_novaDescricao" @bind:event="oninput"></textarea></div>
+            <div class="grid grid-2 gap-3 mt-3">
+                <div class="field"><label for="inc-sistemas">Sistemas afetados (opcional)</label>
+                    <input id="inc-sistemas" class="input" maxlength="500" @bind="_novosSistemas" /></div>
+                <div class="field"><label for="inc-categorias">Categorias de dados envolvidas (opcional)</label>
+                    <input id="inc-categorias" class="input" maxlength="300" placeholder="ex.: cadastrais, fiscais" @bind="_novasCategorias" /></div>
+            </div>
+            <div class="row gap-2 mt-3">
+                <button id="btn-registrar-incidente" class="btn btn-primary" @onclick="RegistrarAsync"
+                        disabled="@(_registrando || string.IsNullOrWhiteSpace(_novoTitulo) || string.IsNullOrWhiteSpace(_novaDescricao))">
+                    @if (_registrando) { <span class="spin on-dark" aria-hidden="true"></span> }
+                    Registrar
+                </button>
+                <button class="btn btn-ghost" @onclick="() => _formAberto = false" disabled="@_registrando">Cancelar</button>
+            </div>
+            @if (_resultadoRegistro is { } r)
+            {
+                <div id="resultado-registro-incidente" class="alert @(r.Sucesso ? "alert-ok" : "alert-warn") mt-3" role="@(r.Sucesso ? "status" : "alert")">
+                    <span class="a-icon" aria-hidden="true">@(r.Sucesso ? "✅" : "⚠️")</span>
+                    <div><div class="a-title">@r.Titulo</div><div class="a-body">@r.Mensagem</div></div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="dt-wrap mb-4">
+        <div class="dt-toolbar wrap gap-2">
+            <FiltroPeriodo Rotulo="Detectado em" Desde="_desde" DesdeChanged="v => _desde = v" Ate="_ate" AteChanged="v => _ate = v" />
+            <FiltroSelect @bind-Valor="_severidade" Opcoes="OpcoesFiltro.SeveridadesIncidente" RotuloTodos="Todas as severidades" AriaLabel="Severidade" Classe="mw-170" />
+            <FiltroSelect @bind-Valor="_status" Opcoes="OpcoesFiltro.StatusIncidente" RotuloTodos="Todos os status" AriaLabel="Status" Classe="mw-160" />
+            <FiltroSelect @bind-Valor="_tipo" Opcoes="OpcoesFiltro.TiposIncidente" RotuloTodos="Todos os tipos" AriaLabel="Tipo" Classe="mw-180" />
+            <input class="input mw-150" type="text" maxlength="40" placeholder="Código"
+                   value="@_codigo" @oninput="e => _codigo = e.Value?.ToString() ?? string.Empty" aria-label="Código" />
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" @onclick="Limpar">Limpar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Filtrar" disabled="@(!PeriodoUi.EhValido(_desde, _ate))">Filtrar</button>
+        </div>
+
+        <EstadoConsultaView Estado="_r?.Estado ?? EstadoConsultaUi.SemPermissao" Carregando="_carregando"
+                            Vazio="_r is not null && _r.Itens.Count == 0"
+                            TituloVazio="Nenhum incidente encontrado" MensagemVazio="Ajuste os filtros ou limpe a pesquisa.">
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th>Código</th><th>Severidade</th><th>Status</th><th>Tipo</th><th>Título</th><th>Risco ao titular</th><th>Responsável</th><th>Detectado</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var i in _r!.Itens)
+                        {
+                            <tr>
+                                <td class="fw-700 mono">@i.Codigo</td>
+                                <td><StatusBadge Texto="@i.Severidade" Situacao="@i.SeveridadeBadge" /></td>
+                                <td><StatusBadge Texto="@i.Status" Situacao="@i.StatusBadge" /></td>
+                                <td class="text-sm">@i.Tipo</td>
+                                <td class="text-sm" title="@i.Titulo">@Truncar(i.Titulo)</td>
+                                <td><StatusBadge Texto="@i.ClassificacaoRisco" Situacao="@i.ClassificacaoRiscoBadge" /></td>
+                                <td class="text-sm mono">@(i.ResponsavelId ?? "—")</td>
+                                <td class="text-sm mono">@i.DetectadoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td class="text-sm"><a href="@($"/auditoria/incidentes/{i.Id}")">Detalhe &rsaquo;</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <Paginacao Pagina="_r.Pagina" TamanhoPagina="_r.TamanhoPagina" Total="_r.Total"
+                       Rotulo="incidente(s)" OnAnterior="Anterior" OnProxima="Proxima" />
+        </EstadoConsultaView>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Auditoria", "/auditoria/eventos"), new Migalha("Incidentes")];
+
+    private string _severidade = "Todos";
+    private string _status = "Todos";
+    private string _tipo = "Todos";
+    private string _codigo = string.Empty;
+    private DateTimeOffset? _desde;
+    private DateTimeOffset? _ate;
+    private int _pagina = 1;
+    private bool _carregando;
+    private ResultadoListaVm<RegistroIncidenteVm>? _r;
+
+    private int TotalPaginas => _r?.TotalPaginas ?? 1;
+
+    // Formulário "Registrar incidente" (só UX: o servidor valida tipo/severidade/contribuinte e autoriza).
+    private bool _formAberto;
+    private bool _registrando;
+    private IReadOnlyList<OpcaoContribuinteVm> _contribuintes = [];
+    private string _novoTipo = "Tecnico";
+    private string _novaSeveridade = "Medio";
+    private string _novoContribuinte = string.Empty;
+    private string _novoTitulo = string.Empty;
+    private string _novaDescricao = string.Empty;
+    private string _novosSistemas = string.Empty;
+    private string _novasCategorias = string.Empty;
+    private ResultadoAcaoVm? _resultadoRegistro;
+
+    private async Task AbrirFormulario()
+    {
+        _formAberto = true;
+        _resultadoRegistro = null;
+        if (Visual.Pode(Permissoes.PlataformaTenantProvisionar) && _contribuintes.Count == 0)
+        {
+            _contribuintes = await Acoes.ListarContribuintesAsync();
+        }
+    }
+
+    private async Task RegistrarAsync()
+    {
+        if (_registrando) { return; }
+        _registrando = true;
+        try
+        {
+            Guid? tenant = Guid.TryParse(_novoContribuinte, out var t) ? t : null;
+            _resultadoRegistro = await Acoes.RegistrarAsync(new NovoIncidenteVm(_novoTipo, _novaSeveridade, _novoTitulo, _novaDescricao,
+                _novosSistemas, _novasCategorias, tenant));
+        }
+        finally { _registrando = false; }
+
+        if (_resultadoRegistro is { Sucesso: true, Id: { } id })
+        {
+            Nav.NavigateTo($"/auditoria/incidentes/{id}");
+        }
+    }
+
+    private static string Truncar(string v) => v.Length <= 40 ? v : v[..40] + "…";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.SegurancaIncidentesGerir)) { await Carregar(); }
+    }
+
+    private async Task Filtrar() { _pagina = 1; await Carregar(); }
+
+    private async Task Limpar() { _severidade = _status = _tipo = "Todos"; _codigo = string.Empty; _desde = _ate = null; _pagina = 1; await Carregar(); }
+
+    private async Task Anterior() { if (_pagina > 1) { _pagina--; await Carregar(); } }
+
+    private async Task Proxima() { if (_pagina < TotalPaginas) { _pagina++; await Carregar(); } }
+
+    private async Task Carregar()
+    {
+        if (_carregando) { return; }
+        // Prompt 81: Desde > Até NÃO consulta (o FiltroPeriodo exibe a mensagem; o servidor também rejeita).
+        if (!PeriodoUi.EhValido(_desde, _ate)) { return; }
+        _carregando = true;
+        try
+        {
+            _r = await Dados.ConsultarAsync(new FiltroIncidentesVm
+            {
+                Desde = _desde, Ate = _ate,
+                Severidade = _severidade, Status = _status, Tipo = _tipo,
+                Codigo = string.IsNullOrWhiteSpace(_codigo) ? null : _codigo,
+                Pagina = _pagina, TamanhoPagina = 50,
+            });
+        }
+        finally { _carregando = false; }
+    }
+}

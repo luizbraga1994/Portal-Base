@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DOMAIN: núcleo do negócio. SEM dependências de projeto e SEM pacotes de
+    infraestrutura (EF, ASP.NET, MySQL, HTTP, Serilog, OTel...). Testável em memória.
+    Qualquer PackageReference aqui deve ser justificado em revisão.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

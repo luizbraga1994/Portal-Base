@@ -1,0 +1,32 @@
+﻿@page "/Error"
+@layout LayoutAutenticacao
+@using System.Diagnostics
+
+@* Página de erro inesperado (fora de Development). Nunca mostra a exceção, a pilha ou detalhes do ambiente (regra 16):
+   só o código da solicitação, que o suporte usa para achar o registro no log. *@
+
+<PageTitle>Erro · Portal Base</PageTitle>
+
+<h1 class="auth__title">Não foi possível concluir</h1>
+<p class="auth__subtitle">Ocorreu um erro inesperado ao processar a sua solicitação. Tente de novo em instantes.</p>
+
+@if (ShowRequestId)
+{
+    <p class="text-sm">
+        Se o problema continuar, informe ao suporte o <strong>código da solicitação</strong>:
+        <code id="codigo-solicitacao">@RequestId</code>
+    </p>
+}
+
+<a class="btn btn-primary w-full jc-center mt-4" href="/">Voltar ao início</a>
+
+@code{
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

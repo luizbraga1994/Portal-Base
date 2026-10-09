@@ -1,0 +1,397 @@
+@page "/configuracoes/email"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Notificacoes
+@using PortalBase.Domain.Notificacoes
+@inject ConfiguracaoEmailPlataforma Configuracao
+@inject IAutorizacaoVisual Visual
+@inject ServicoNotificacoes Notificacoes
+
+@* Configurações → E-mail (SMTP): o servidor de e-mail do portal (um só para todos os contribuintes). Só o
+   Administrador da plataforma (plataforma.email.administrar, decidido no servidor). A senha vai para o cofre e nunca
+   volta para a tela. *@
+
+<PageTitle>E-mail (SMTP) · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Configurações · Plataforma" Titulo="E-mail de disparo (SMTP)"
+            Subtitulo="O servidor que envia os e-mails do portal: Esqueci a senha, convites de novos usuários e links de senha. Vale para todos os contribuintes." />
+
+@if (!Visual.Pode(Permissoes.PlataformaEmailAdministrar))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Configurar o e-mail do portal é operação de plataforma (plataforma.email.administrar): só o Administrador da plataforma. A decisão é do servidor." /></div>
+}
+else if (_atual is null)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando a configuração…</p></div></div>
+}
+else
+{
+    <div class="grid grid-3 mb-4">
+        <StatCard Rotulo="Envio" Valor="@(_atual.Habilitado ? "Ligado" : "Desligado")" Icone="&#9993;&#65039;" Acento="@(!_atual.Habilitado)" />
+        <StatCard Rotulo="Modo" Valor="@RotuloModo(_atual.Modo)" Icone="&#128225;" />
+        <StatCard Rotulo="Configurado em" Valor="@(_atual.Origem == OrigemConfiguracaoEmail.Tela ? "Nesta tela" : "Servidor")" Icone="&#9881;&#65039;" />
+    </div>
+
+    @if (_atual.Origem == OrigemConfiguracaoEmail.Servidor)
+    {
+        <div class="alert alert-info mb-4" role="status" id="origem-servidor">
+            <span class="a-icon" aria-hidden="true">&#8505;&#65039;</span>
+            <div class="a-body">
+                Hoje vale a configuração do <strong>servidor</strong> (seção <span class="mono">Email</span> do appsettings ou
+                user-secrets@(_atual.Modo == "PastaLocal" ? " — em desenvolvimento, os e-mails viram arquivos .eml numa pasta" : string.Empty)).
+                Ao salvar aqui, a configuração desta tela passa a valer no lugar dela.
+            </div>
+        </div>
+    }
+
+    <div class="card card-pad" id="form-email">
+        <div class="card-head plain"><h3 class="h-95">Servidor SMTP</h3></div>
+        <label class="row gap-2 ai-center mt-3" for="email-habilitado">
+            <input type="checkbox" id="email-habilitado" @bind="_habilitado" disabled="@_executando" />
+            <span><strong>Enviar e-mails</strong> (desligado, nenhum e-mail sai — nem o "Esqueci a senha")</span>
+        </label>
+        <div class="grid grid-2 mt-3">
+            <div class="field">
+                <label for="email-servidor">Servidor</label>
+                <input class="input mono" id="email-servidor" maxlength="@ConfiguracaoEmail.TamanhoMaximoServidor" placeholder="smtp.office365.com" @bind="_servidor" @bind:event="oninput" disabled="@_executando" />
+            </div>
+            <div class="field">
+                <label for="email-porta">Porta</label>
+                <input class="input mono" id="email-porta" type="number" min="1" max="65535" @bind="_porta" disabled="@_executando" />
+                <div class="help">587 com STARTTLS (o mais comum) ou 465 com TLS direto.</div>
+            </div>
+            <div class="field">
+                <label for="email-seguranca">Segurança da conexão</label>
+                <select class="select" id="email-seguranca" @bind="_seguranca" disabled="@_executando">
+                    <option value="@ConfiguracaoEmail.SegurancaStartTls">STARTTLS (porta 587)</option>
+                    <option value="@ConfiguracaoEmail.SegurancaSslTls">TLS direto (porta 465)</option>
+                    <option value="@ConfiguracaoEmail.SegurancaNenhuma">Nenhuma (só em desenvolvimento)</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="email-usuario">Usuário <span class="text-faint">(vazio = sem autenticação)</span></label>
+                <input class="input" id="email-usuario" autocomplete="off" maxlength="@ConfiguracaoEmail.TamanhoMaximoUsuario" @bind="_usuario" @bind:event="oninput" disabled="@_executando" />
+            </div>
+            <div class="field">
+                <label for="email-senha">Senha</label>
+                <input class="input" id="email-senha" type="password" autocomplete="new-password" maxlength="512"
+                       placeholder="@(_atual.SenhaDefinida && _atual.Origem == OrigemConfiguracaoEmail.Tela ? "•••••••• (definida — deixe vazio para manter)" : "Senha do usuário SMTP")"
+                       @bind="_senha" @bind:event="oninput" disabled="@_executando" />
+                <div class="help">Vai direto para o cofre de segredos; nunca é mostrada nem gravada no banco ou em log.</div>
+            </div>
+            <div class="field">
+                <label for="email-url">Endereço público do portal</label>
+                <input class="input mono" id="email-url" maxlength="@ConfiguracaoEmail.TamanhoMaximoUrl" placeholder="https://portal.suaempresa.com.br" @bind="_url" @bind:event="oninput" disabled="@_executando" />
+                <div class="help">Base dos links enviados por e-mail (https:// em produção).</div>
+            </div>
+            <div class="field">
+                <label for="email-remetente">E-mail do remetente</label>
+                <input class="input" id="email-remetente" type="email" maxlength="@ConfiguracaoEmail.TamanhoMaximoEmail" placeholder="nao-responda@suaempresa.com.br" @bind="_remetente" @bind:event="oninput" disabled="@_executando" />
+            </div>
+            <div class="field">
+                <label for="email-remetente-nome">Nome do remetente</label>
+                <input class="input" id="email-remetente-nome" maxlength="@ConfiguracaoEmail.TamanhoMaximoNome" @bind="_remetenteNome" @bind:event="oninput" disabled="@_executando" />
+            </div>
+        </div>
+        <div class="row wrap gap-3">
+            <button class="btn btn-primary" id="btn-salvar-email" type="button" @onclick="Salvar" disabled="@_executando">
+                @(_executando ? "Salvando…" : "Salvar configuração")
+            </button>
+            @if (_atual.Origem == OrigemConfiguracaoEmail.Tela)
+            {
+                <button class="btn btn-ghost" id="btn-restaurar-email" type="button" @onclick="() => _confirmarRestauracao = true" disabled="@_executando">
+                    Voltar à configuração do servidor
+                </button>
+            }
+        </div>
+
+        @if (_erros.Count > 0)
+        {
+            <div class="alert alert-bad mt-3" role="alert" id="erros-email">
+                <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+                <div class="a-body">
+                    <strong>Configuração não salva.</strong>
+                    <ul class="mt-1">@foreach (var erro in _erros) { <li>@erro</li> }</ul>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="card card-pad mt-4" id="aparencia-email">
+        <div class="card-head plain"><h3 class="h-95">Aparência dos e-mails</h3></div>
+        <p class="text-sm text-muted mt-2">
+            Todos os e-mails do portal (redefinição de senha, convite, senha temporária e o teste) saem com este layout:
+            cabeçalho com a marca, botão de ação e, no rodapé, o link do portal (o endereço público acima).
+        </p>
+        @if (_atual.Origem != OrigemConfiguracaoEmail.Tela)
+        {
+            <div class="alert alert-info mt-3" role="status" id="aparencia-requer-tela">
+                <span class="a-icon" aria-hidden="true">&#8505;&#65039;</span>
+                <div class="a-body">Para trocar a aparência, salve antes o envio (SMTP) nesta tela: a aparência fica guardada junto dele. A pré-visualização já funciona.</div>
+            </div>
+        }
+        <div class="grid grid-2 mt-3">
+            <div>
+                <div class="field">
+                    <label for="email-tema">Tema</label>
+                    <select class="select" id="email-tema" @bind="_tema" @bind:after="AtualizarPreviaAsync" disabled="@_executando">
+                        @foreach (var tema in TemasEmail.Todos)
+                        {
+                            <option value="@tema.Codigo">@tema.Nome</option>
+                        }
+                    </select>
+                    <div class="help">@TemasEmail.Obter(_tema).Descricao</div>
+                </div>
+                <label class="row gap-2 ai-center" for="email-cor-personalizada">
+                    <input type="checkbox" id="email-cor-personalizada" @bind="_corPersonalizada" @bind:after="AtualizarPreviaAsync" disabled="@_executando" />
+                    <span>Usar uma cor de destaque própria (botões e links)</span>
+                </label>
+                @if (_corPersonalizada)
+                {
+                    <div class="field mt-2">
+                        <label for="email-cor">Cor de destaque</label>
+                        <div class="row gap-2 ai-center">
+                            <input class="input input-cor" id="email-cor" type="color" @bind="_cor" @bind:after="AtualizarPreviaAsync" disabled="@_executando" />
+                            <span class="mono text-sm" id="email-cor-valor">@_cor.ToUpperInvariant()</span>
+                        </div>
+                        <div class="help">O texto do botão fica branco ou preto, o que tiver mais contraste.</div>
+                    </div>
+                }
+                <div class="field mt-3">
+                    <label for="email-rodape">Texto do rodapé <span class="text-faint">(opcional)</span></label>
+                    <textarea class="input" id="email-rodape" rows="3" maxlength="@ConfiguracaoEmail.TamanhoMaximoTextoRodape"
+                              placeholder="Andersen Consulting · (11) 0000-0000 · suporte@suaempresa.com.br"
+                              @bind="_rodape" @bind:event="oninput" @bind:after="AtualizarPreviaAsync" disabled="@_executando"></textarea>
+                    <div class="help">Aparece no fim de todos os e-mails, acima do aviso de e-mail automático. Só texto.</div>
+                </div>
+                <button class="btn btn-primary" id="btn-salvar-aparencia" type="button" @onclick="SalvarAparencia"
+                        disabled="@(_executando || _atual.Origem != OrigemConfiguracaoEmail.Tela)">
+                    @(_salvandoAparencia ? "Salvando…" : "Salvar aparência")
+                </button>
+                @if (_errosAparencia.Count > 0)
+                {
+                    <div class="alert alert-bad mt-3" role="alert" id="erros-aparencia">
+                        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+                        <div class="a-body"><ul class="mt-1">@foreach (var erro in _errosAparencia) { <li>@erro</li> }</ul></div>
+                    </div>
+                }
+            </div>
+            <div>
+                <div class="text-sm text-muted mb-2">Pré-visualização</div>
+                <div class="previa-email" id="previa-email" aria-label="Pré-visualização do e-mail">@_previa</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card card-pad mt-4" id="teste-email">
+        <div class="card-head plain"><h3 class="h-95">Enviar um e-mail de teste</h3></div>
+        <p class="text-sm text-muted mt-2">Usa a configuração em vigor (salve antes). O resultado aparece aqui na hora.</p>
+        <div class="row wrap gap-3 ai-end mt-3">
+            <div class="field mb-0 mw-320">
+                <label for="email-teste-para">Enviar para</label>
+                <input class="input" id="email-teste-para" type="email" maxlength="254" @bind="_para" @bind:event="oninput" disabled="@_executando" />
+            </div>
+            <button class="btn btn-secondary" id="btn-testar-email" type="button" @onclick="Testar" disabled="@(_executando || string.IsNullOrWhiteSpace(_para))">
+                @(_testando ? "Enviando…" : "Enviar teste")
+            </button>
+        </div>
+        @if (_resultadoTeste is not null)
+        {
+            <div class="alert @(_resultadoTeste.Sucesso ? "alert-ok" : "alert-bad") mt-3" role="@(_resultadoTeste.Sucesso ? "status" : "alert")" id="resultado-teste-email">
+                <span class="a-icon" aria-hidden="true">@(_resultadoTeste.Sucesso ? "✅" : "⚠️")</span>
+                <div class="a-body">@(_resultadoTeste.Sucesso ? "E-mail de teste enviado. Confira a caixa de entrada (e o spam)." : string.Join(" ", _resultadoTeste.Erros))</div>
+            </div>
+        }
+    </div>
+
+    <ConfirmacaoAcao Visivel="_confirmarRestauracao" Perigoso="false" Processando="_executando"
+                     Titulo="Voltar à configuração do servidor?"
+                     Mensagem="A configuração desta tela será apagada e voltará a valer a do servidor (appsettings). A operação é auditada."
+                     TextoConfirmar="Voltar" OnConfirmar="Restaurar" OnCancelar="() => _confirmarRestauracao = false" />
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Configurações"), new Migalha("E-mail (SMTP)")];
+
+    private ConfiguracaoEmailAtual? _atual;
+    private bool _habilitado;
+    private string _servidor = string.Empty;
+    private int _porta = 587;
+    private string _seguranca = ConfiguracaoEmail.SegurancaStartTls;
+    private string _usuario = string.Empty;
+    private string _senha = string.Empty;
+    private string _url = string.Empty;
+    private string _remetente = string.Empty;
+    private string _remetenteNome = "Portal Base";
+    private string _para = string.Empty;
+    private bool _executando;
+    private bool _testando;
+    private bool _confirmarRestauracao;
+    private IReadOnlyList<string> _erros = [];
+    private ResultadoConfiguracaoEmail? _resultadoTeste;
+    private string _tema = TemasEmail.Padrao;
+    private bool _corPersonalizada;
+    private string _cor = "#9E1B32";
+    private string _rodape = string.Empty;
+    private bool _salvandoAparencia;
+    private IReadOnlyList<string> _errosAparencia = [];
+    private MarkupString _previa;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.PlataformaEmailAdministrar))
+        {
+            await CarregarAsync();
+        }
+    }
+
+    private async Task CarregarAsync()
+    {
+        _atual = await Configuracao.ObterAsync();
+        _habilitado = _atual.Habilitado;
+        _servidor = _atual.Servidor;
+        _porta = _atual.Porta;
+        _seguranca = _atual.Seguranca;
+        _usuario = _atual.Usuario;
+        _url = _atual.UrlPublicaPortal;
+        _remetente = _atual.RemetenteEmail;
+        _remetenteNome = string.IsNullOrWhiteSpace(_atual.RemetenteNome) ? "Portal Base" : _atual.RemetenteNome;
+        _senha = string.Empty;
+        _tema = TemasEmail.Obter(_atual.Tema).Codigo;
+        _corPersonalizada = ConfiguracaoEmail.CorValida(_atual.CorDestaque);
+        _cor = _corPersonalizada ? _atual.CorDestaque.ToLowerInvariant() : "#9e1b32";
+        _rodape = _atual.TextoRodape;
+        await AtualizarPreviaAsync();
+    }
+
+    private AlteracaoAparenciaEmail Aparencia() => new(_tema, _corPersonalizada ? _cor : string.Empty, _rodape);
+
+    // O HTML da prévia é montado no servidor pelo mesmo layout dos e-mails, com conteúdo de exemplo fixo e os textos da
+    // tela codificados (sem script, sem HTML do usuário) — por isso pode ser exibido como marcação.
+    private async Task AtualizarPreviaAsync()
+    {
+        try
+        {
+            _previa = new MarkupString(await Configuracao.PreviaAsync(Aparencia()));
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, MapeadorAcaoAdmin.MapearExcecao(excecao));
+        }
+    }
+
+    private async Task SalvarAparencia()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = _salvandoAparencia = true;
+        try
+        {
+            var r = await Configuracao.SalvarAparenciaAsync(Aparencia());
+            _errosAparencia = r.Erros;
+            if (r.Sucesso)
+            {
+                Notificacoes.Sucesso("Aparência dos e-mails salva", "Vale a partir do próximo e-mail enviado.");
+                await CarregarAsync();
+            }
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, MapeadorAcaoAdmin.MapearExcecao(excecao));
+        }
+        finally
+        {
+            _executando = _salvandoAparencia = false;
+        }
+    }
+
+    private async Task Salvar()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        try
+        {
+            var r = await Configuracao.SalvarAsync(new AlteracaoConfiguracaoEmail(
+                _habilitado, _servidor, _porta, _seguranca, _usuario, _senha, _remetente, _remetenteNome, _url));
+            _erros = r.Erros;
+            if (r.Sucesso)
+            {
+                Notificacoes.Sucesso("Configuração de e-mail salva", "Vale a partir do próximo envio.");
+                await CarregarAsync();
+            }
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, MapeadorAcaoAdmin.MapearExcecao(excecao));
+        }
+        finally
+        {
+            _senha = string.Empty; // a senha nunca fica na tela depois da tentativa
+            _executando = false;
+        }
+    }
+
+    private async Task Restaurar()
+    {
+        _executando = true;
+        try
+        {
+            await Configuracao.RestaurarConfiguracaoDoServidorAsync();
+            Notificacoes.Sucesso("Configuração do servidor restaurada", "Vale de novo a seção Email do servidor.");
+            _erros = [];
+            await CarregarAsync();
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, MapeadorAcaoAdmin.MapearExcecao(excecao));
+        }
+        finally
+        {
+            _confirmarRestauracao = false;
+            _executando = false;
+        }
+    }
+
+    private async Task Testar()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = _testando = true;
+        try
+        {
+            _resultadoTeste = await Configuracao.TestarAsync(_para);
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, MapeadorAcaoAdmin.MapearExcecao(excecao));
+        }
+        finally
+        {
+            _executando = _testando = false;
+        }
+    }
+
+    private static string RotuloModo(string modo) => modo switch
+    {
+        "Smtp" => "SMTP",
+        "PastaLocal" => "Pasta local (.eml)",
+        _ => "Desligado",
+    };
+}

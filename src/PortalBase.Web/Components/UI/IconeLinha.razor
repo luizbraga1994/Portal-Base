@@ -1,0 +1,17 @@
+@* Ícone de linha (SVG, traço na cor do texto). Decorativo: o texto ao lado (ou o aria-label do botão) é que nomeia. *@
+@using PortalBase.Web.Ui.Navegacao
+
+<svg class="@Classe" width="@Tamanho" height="@Tamanho" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+     stroke-width="@Traco" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <path d="@IconesLinha.Caminho(Nome)"></path>
+</svg>
+
+@code {
+    [Parameter] public string? Nome { get; set; }
+
+    [Parameter] public int Tamanho { get; set; } = 16;
+
+    [Parameter] public string Traco { get; set; } = "1.8";
+
+    [Parameter] public string? Classe { get; set; }
+}

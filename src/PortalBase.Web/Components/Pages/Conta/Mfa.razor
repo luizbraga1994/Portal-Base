@@ -1,0 +1,34 @@
+@page "/conta/verificar"
+@layout LayoutEntrada
+
+<PageTitle>Verificação · Portal Base</PageTitle>
+
+<h1 class="auth__title">Verificação em duas etapas</h1>
+<p class="auth__subtitle">Informe o código do seu aplicativo autenticador (step-up MFA).</p>
+
+@if (Erro == 1)
+{
+    <div class="alert alert-bad mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+        <div class="a-body">Código inválido ou expirado. Tente novamente.</div>
+    </div>
+}
+
+<form method="post" action="/conta/mfa">
+    <AntiforgeryToken />
+    <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+    <div class="field">
+        <label for="codigo">Código</label>
+        @* Aceita também o código de RECUPERAÇÃO (letras, dígitos e hífen, ex.: ABCDE-12345): nada de pattern numérico
+           nem teclado só numérico. A validação de verdade é do servidor (GestaoMfa.ValidarAsync). *@
+        <input class="input mono" id="codigo" name="codigo" autocomplete="one-time-code" autocapitalize="characters"
+               spellcheck="false" minlength="6" maxlength="16" required />
+        <div class="help">Código de 6 dígitos do seu autenticador — ou um código de recuperação.</div>
+    </div>
+    <button class="btn btn-primary w-full" type="submit">Confirmar</button>
+</form>
+
+@code {
+    [SupplyParameterFromQuery] public int Erro { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+}

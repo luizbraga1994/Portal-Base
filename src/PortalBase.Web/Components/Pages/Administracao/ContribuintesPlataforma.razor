@@ -1,0 +1,305 @@
+@page "/admin/contribuintes"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Catalogo
+@using PortalBase.Domain.Catalogo
+@inject CadastroContribuinte Cadastro
+@inject AtualizacaoSchemaContribuintes Estrutura
+@inject IAutorizacaoVisual Visual
+@inject ServicoNotificacoes Notificacoes
+
+@* Plataforma: cadastrar contribuintes (tenants) novos — só o Administrador da plataforma (plataforma.tenant.provisionar,
+   decidido no servidor). Cada contribuinte ganha a própria base de dados, criada e preparada pelo portal. *@
+
+<PageTitle>Contribuintes · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração · Plataforma" Titulo="Contribuintes"
+            Subtitulo="Cadastre novos contribuintes (empresas). Cada um ganha a própria base de dados, criada e preparada pelo portal. Só o Administrador da plataforma vê esta tela." />
+
+@if (!Visual.Pode(Permissoes.PlataformaTenantProvisionar))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Cadastrar contribuintes é operação de plataforma (plataforma.tenant.provisionar): só o Administrador da plataforma. A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else
+{
+    <div class="card card-pad" id="novo-contribuinte">
+        <div class="card-head plain"><h3 class="h-95">Novo contribuinte</h3></div>
+        <p class="text-sm text-muted mt-2">
+            O portal cadastra o contribuinte, cria a base de dados dele (<span class="mono">portalbase_tenant_&lt;nome&gt;</span>),
+            aplica a estrutura e o deixa <strong>Ativo</strong>. Pode levar alguns segundos. Depois, use <strong>Trocar</strong>
+            (no topo) para entrar nele e cadastre os usuários em Administração → Usuários.
+        </p>
+        <div class="grid grid-2 mt-3">
+            <div class="field">
+                <label for="contrib-cnpj">CNPJ</label>
+                <input class="input mono" id="contrib-cnpj" maxlength="18" placeholder="00.000.000/0000-00" @bind="_cnpj" @bind:event="oninput" disabled="@_executando" />
+            </div>
+            <div class="field">
+                <label for="contrib-nome">Nome do tenant</label>
+                <input class="input mono" id="contrib-nome" maxlength="@NomeTenant.TamanhoMaximo" placeholder="EX.: STAKE" @bind="_nome" @bind:event="oninput" disabled="@_executando" />
+                <div class="help">Curto e único, em maiúsculas: letras sem acento, números e _ (começa com letra). Define a base de dados e <strong>não muda depois</strong>.</div>
+            </div>
+            <div class="field">
+                <label for="contrib-razao">Razão social</label>
+                <input class="input" id="contrib-razao" maxlength="@Tenant.TamanhoMaximoRazaoSocial" @bind="_razao" @bind:event="oninput" disabled="@_executando" />
+            </div>
+        </div>
+        <button class="btn btn-primary" id="btn-criar-contribuinte" type="button" @onclick="Criar"
+                disabled="@(_executando || string.IsNullOrWhiteSpace(_cnpj) || string.IsNullOrWhiteSpace(_nome) || string.IsNullOrWhiteSpace(_razao))">
+            @(_executando ? "Criando a base de dados…" : "Criar contribuinte")
+        </button>
+
+        @if (_resultado is not null)
+        {
+            <div class="alert @(_resultado.Sucesso ? "alert-ok" : "alert-bad") mt-3" role="@(_resultado.Sucesso ? "status" : "alert")" id="resultado-contribuinte">
+                <span class="a-icon" aria-hidden="true">@(_resultado.Sucesso ? "✅" : "⚠️")</span>
+                <div class="a-body"><strong>@_resultado.Titulo.</strong> @_resultado.Mensagem</div>
+            </div>
+        }
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-head">
+            <h3 class="h-95">Contribuintes cadastrados</h3>
+            <button class="btn btn-ghost" type="button" @onclick="CarregarAsync" disabled="@_executando">Atualizar</button>
+        </div>
+        @if (_lista is null)
+        {
+            <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando contribuintes…</p></div>
+        }
+        else if (_erroLista)
+        {
+            <div class="state" role="alert"><h3>Não foi possível carregar</h3><p>A consulta falhou. Nenhum detalhe interno é exibido.</p></div>
+        }
+        else if (_lista.Count == 0)
+        {
+            <EmptyState Emoji="&#127970;" Titulo="Nenhum contribuinte cadastrado" Mensagem="Cadastre o primeiro no quadro acima." />
+        }
+        else
+        {
+            <div class="dt-scroll">
+                <table class="dt" id="tabela-contribuintes">
+                    <thead>
+                        <tr><th>Nome</th><th>CNPJ</th><th>Razão social</th><th>Situação</th><th>Criado (UTC)</th><th class="ta-right">Ação</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in _lista)
+                        {
+                            var (rotulo, badge) = AdminUi.EstadoTenant(c.Estado);
+                            <tr data-contribuinte="@c.Nome">
+                                <td class="mono">@c.Nome</td>
+                                <td class="mono">@FormatarCnpj(c.Cnpj)</td>
+                                <td>@c.RazaoSocial</td>
+                                <td><StatusBadge Texto="@rotulo" Situacao="@badge" />@if (c.ComFalha && c.Estado != EstadoProvisionamento.Ativo) { <span class="text-sm text-muted"> · falha registrada</span> }</td>
+                                <td class="mono">@c.CriadoEmUtc.ToString("dd/MM/yyyy HH:mm", _ci)</td>
+                                <td class="ta-right">
+                                    @if (c.Estado is EstadoProvisionamento.Pendente or EstadoProvisionamento.Falhado or EstadoProvisionamento.Pronto)
+                                    {
+                                        <button class="btn btn-ghost" type="button" @onclick="() => Retomar(c)" disabled="@_executando">Tentar de novo</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-faint">—</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-sm text-muted card-pad">
+                <strong>Tentar de novo</strong> aparece quando a preparação da base parou no meio (Pendente, Falhado ou Pronto):
+                o portal retoma de onde parou e ativa o contribuinte. Para desabilitar um contribuinte, entre nele (Trocar) e use
+                Administração → Tenant.
+            </p>
+        }
+    </div>
+
+    <div class="card card-pad mt-4" id="estrutura-bases">
+        <div class="card-head plain"><h3 class="h-95">Estrutura das bases</h3></div>
+        <p class="text-sm text-muted mt-2">
+            Cada nova versão do portal pode trazer mudanças na estrutura das bases dos contribuintes. Aqui você vê quais bases
+            estão na versão atual e aplica as atualizações pendentes (uma base por vez, com bloqueio, validação e auditoria).
+            Contribuinte desabilitado é atualizado quando for reativado.
+        </p>
+        @if (_estrutura is null)
+        {
+            <p class="text-sm text-muted mt-2">Consultando…</p>
+        }
+        else
+        {
+            <p class="mt-3" id="estrutura-resumo">
+                @if (_estrutura.Desatualizadas == 0)
+                {
+                    <span>✅ Todas as @_estrutura.Bases.Count.ToString(_ci) base(s) estão na versão atual.</span>
+                }
+                else
+                {
+                    <span>⚠️ <strong>@_estrutura.Desatualizadas.ToString(_ci)</strong> de @_estrutura.Bases.Count.ToString(_ci) base(s) precisam de atualização:
+                        <span class="mono">@string.Join(", ", _estrutura.Bases.Where(b => !b.Atualizada).Select(b => b.Nome))</span></span>
+                }
+            </p>
+            <p class="text-sm text-muted mono m-0">Versão atual: @(_estrutura.VersaoEsperada ?? "—")</p>
+            @if (_estrutura.Desatualizadas > 0)
+            {
+                <button class="btn btn-primary mt-3" id="btn-atualizar-bases" type="button" @onclick="() => _confirmarEstrutura = true" disabled="@_executando">
+                    Atualizar bases
+                </button>
+            }
+        }
+        @if (_resultadoEstrutura is not null)
+        {
+            <div class="alert @(_resultadoEstrutura.Sucesso ? "alert-ok" : "alert-warn") mt-3" role="@(_resultadoEstrutura.Sucesso ? "status" : "alert")" id="resultado-estrutura">
+                <span class="a-icon" aria-hidden="true">@(_resultadoEstrutura.Sucesso ? "✅" : "⚠️")</span>
+                <div><div class="a-title">@_resultadoEstrutura.Titulo</div><div class="a-body">@_resultadoEstrutura.Mensagem</div></div>
+            </div>
+        }
+    </div>
+}
+
+<ConfirmacaoAcao Visivel="_confirmarEstrutura" Titulo="Atualizar a estrutura das bases?" TextoConfirmar="Atualizar" Processando="_executando"
+                 Mensagem="As atualizações pendentes são aplicadas em cada base desatualizada, uma por vez. Pode levar alguns minutos; o contribuinte continua disponível."
+                 OnConfirmar="AtualizarEstruturaAsync" OnCancelar="() => _confirmarEstrutura = false" />
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Administração", "/admin"), new Migalha("Contribuintes")];
+    private static readonly CultureInfo _ci = CultureInfo.InvariantCulture;
+
+    private string _cnpj = string.Empty;
+    private string _nome = string.Empty;
+    private string _razao = string.Empty;
+    private bool _executando;
+    private bool _erroLista;
+    private IReadOnlyList<ResumoContribuinte>? _lista;
+    private ResultadoAcaoVm? _resultado;
+    private SituacaoSchemaContribuintes? _estrutura;
+    private ResultadoAcaoVm? _resultadoEstrutura;
+    private bool _confirmarEstrutura;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.PlataformaTenantProvisionar))
+        {
+            await CarregarAsync();
+        }
+    }
+
+    private async Task CarregarAsync()
+    {
+        try
+        {
+            _erroLista = false;
+            _lista = await Cadastro.ListarAsync();
+            _estrutura = await Estrutura.ObterSituacaoAsync();
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            _erroLista = true;
+            _lista ??= [];
+        }
+    }
+
+    private async Task AtualizarEstruturaAsync()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        try
+        {
+            var r = await Estrutura.AtualizarDesatualizadasAsync();
+            var falhas = r.Where(x => !x.Atualizada).ToList();
+            _resultadoEstrutura = falhas.Count == 0
+                ? new ResultadoAcaoVm(true, EstadoAcaoUi.Ok, "Bases atualizadas", $"{r.Count.ToString(_ci)} base(s) atualizada(s) para a versão atual.")
+                : new ResultadoAcaoVm(false, EstadoAcaoUi.Erro, "Atualização com pendências",
+                    $"{(r.Count - falhas.Count).ToString(_ci)} atualizada(s); não atualizadas: "
+                    + string.Join("; ", falhas.Select(f => $"{f.Nome} ({f.Motivo})")) + ".");
+            MapeadorAcaoAdmin.Notificar(Notificacoes, _resultadoEstrutura);
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            _resultadoEstrutura = MapeadorAcaoAdmin.MapearExcecao(excecao);
+        }
+        finally
+        {
+            _executando = false;
+            _confirmarEstrutura = false;
+        }
+
+        await CarregarAsync();
+    }
+
+    private async Task Criar()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        try
+        {
+            var r = await Cadastro.CriarAsync(new NovoContribuinte(_cnpj, _nome, _razao));
+            _resultado = Mapear(r);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, _resultado);
+            if (r.Sucesso)
+            {
+                _cnpj = _nome = _razao = string.Empty;
+            }
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            _resultado = MapeadorAcaoAdmin.MapearExcecao(excecao);
+        }
+        finally
+        {
+            _executando = false;
+        }
+
+        await CarregarAsync();
+    }
+
+    private async Task Retomar(ResumoContribuinte c)
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        try
+        {
+            _resultado = Mapear(await Cadastro.RetomarAsync(c.Id));
+            MapeadorAcaoAdmin.Notificar(Notificacoes, _resultado);
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            _resultado = MapeadorAcaoAdmin.MapearExcecao(excecao);
+        }
+        finally
+        {
+            _executando = false;
+        }
+
+        await CarregarAsync();
+    }
+
+    private static ResultadoAcaoVm Mapear(ResultadoCadastroContribuinte r) => r.Sucesso
+        ? new ResultadoAcaoVm(true, EstadoAcaoUi.Ok, "Contribuinte criado",
+            $"{r.Nome} está Ativo, com a base de dados pronta. Use Trocar (no topo) para entrar nele e cadastrar os usuários.")
+        : new ResultadoAcaoVm(false, r.Etapa == EtapaCadastroContribuinte.Dados ? EstadoAcaoUi.Invalido : EstadoAcaoUi.Erro,
+            r.Etapa == EtapaCadastroContribuinte.Dados ? "Contribuinte não cadastrado" : "Contribuinte incompleto",
+            r.Erro ?? "Não foi possível concluir.");
+
+    private static string FormatarCnpj(string cnpj)
+        => cnpj.Length == 14 ? $"{cnpj[..2]}.{cnpj[2..5]}.{cnpj[5..8]}/{cnpj[8..12]}-{cnpj[12..]}" : cnpj;
+}

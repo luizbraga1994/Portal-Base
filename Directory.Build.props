@@ -1,0 +1,56 @@
+<Project>
+
+  <!--
+    Guardrails de build aplicados a TODOS os projetos da solution.
+    Suporta as REGRAS TRANSVERSAIS OBRIGATÓRIAS (ver docs/REGRAS-TRANSVERSAIS-OBRIGATORIAS.md).
+    Não relaxe estes valores sem registrar a justificativa; eles são a primeira
+    linha de defesa contra as violações mais comuns das regras de segurança.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework Condition="'$(TargetFramework)' == '' and '$(TargetFrameworks)' == ''">net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Regra 1/2/10: nullable evita NREs e força tratar ausência de dado. -->
+    <Nullable>enable</Nullable>
+
+    <!-- Regra 20 / qualidade: avisos são erros; código novo entra limpo. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Compatibilidade de versão entre analisadores e o Roslyn do SDK
+         (não deve derrubar o build por diferença de versão do compilador). -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS9057</WarningsNotAsErrors>
+
+    <!-- Analisadores .NET, com ênfase MÁXIMA na categoria de segurança
+         (CA2100 SQL injection, CA3xxx, CA5xxx). Suporta regras 13, 7, 8, 16. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Determinismo e reprodutibilidade de build. -->
+    <Deterministic>true</Deterministic>
+
+    <!-- Versionamento de release (Prompt 53, Fase 3). Base semântica; a CI pode sobrepor
+         com /p:Version=... e o runtime reporta commit/build por variável de ambiente
+         (PORTALBASE_BUILD_*), nunca embutindo segredo. -->
+    <VersionPrefix>2.0.0</VersionPrefix>
+    <Product>Portal Base</Product>
+    <Company>Portal Base</Company>
+  </PropertyGroup>
+
+  <!--
+    Regra 14: proibir Microsoft.EntityFrameworkCore ...IgnoreQueryFilters() e
+    quaisquer outras APIs perigosas listadas em BannedSymbols.txt.
+    O analisador não tem dependências de runtime e não afeta a saída publicada.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+
+</Project>

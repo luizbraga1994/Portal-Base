@@ -1,0 +1,208 @@
+@page "/admin/perfis/novo"
+@page "/admin/perfis/{Id:guid}"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Identidade
+@inject IAutorizacaoVisual Visual
+@inject IDadosPerfis Dados
+@inject ServicoNotificacoes Notificacoes
+@inject NavigationManager Navegacao
+
+<PageTitle>Perfil · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="@Titulo"
+            Subtitulo="Escolha o nome e marque as permissões que o perfil dá. As marcadas com MFA pedem a verificação em duas etapas na hora de usar.">
+    <Acoes>
+        <a class="btn btn-secondary btn-sm" href="/admin/perfis">&lsaquo; Perfis</a>
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Cadastrar perfis exige a permissão admin.usuarios. A decisão é do servidor." /></div>
+}
+else if (_carregando)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Carregando…</p></div></div>
+}
+else if (_estado != EstadoConsultaUi.Ok)
+{
+    <div class="card"><EmptyState Emoji="&#127970;" Titulo="@(_estado == EstadoConsultaUi.SemTenant ? "Selecione um contribuinte" : "Não foi possível carregar")"
+        Mensagem="Os perfis são cadastrados no contexto de um contribuinte autorizado." /></div>
+}
+else if (Id is not null && _existente is null)
+{
+    <div class="card"><EmptyState Emoji="&#128269;" Titulo="Perfil não encontrado" Mensagem="O perfil não existe neste contribuinte.">
+        <Acao><a class="btn btn-primary" href="/admin/perfis">Voltar aos perfis</a></Acao></EmptyState></div>
+}
+else
+{
+    @if (SomenteLeitura)
+    {
+        <div class="alert alert-info mb-4" role="note">
+            <span class="a-icon" aria-hidden="true">&#8505;&#65039;</span>
+            <div class="a-body">Este é um perfil do <strong>sistema</strong> (vale para todos os contribuintes) e não pode ser alterado.
+                <a href="@($"/admin/perfis/novo?copiar={_existente!.Id}")">Duplique-o</a> para criar um personalizado.</div>
+        </div>
+    }
+
+    <div class="card card-pad mb-4" id="perfil-form">
+        <div class="grid grid-2 gap-4">
+            <div class="field">
+                <label for="perfil-nome">Nome do perfil</label>
+                <input class="input" id="perfil-nome" maxlength="64" @bind="_nome" @bind:event="oninput" disabled="@SomenteLeitura" placeholder="ex.: Contador" />
+            </div>
+            <div class="field">
+                <label for="perfil-descricao">Descrição (opcional)</label>
+                <input class="input" id="perfil-descricao" maxlength="256" @bind="_descricao" @bind:event="oninput" disabled="@SomenteLeitura" />
+            </div>
+        </div>
+
+        <div class="row gap-3 ai-center jc-between mt-2">
+            <h3 class="h-95 m-0">Permissões <span class="text-muted text-sm">(@_marcadas.Count marcada(s))</span></h3>
+            @if (!SomenteLeitura)
+            {
+                <div class="row gap-2">
+                    <button class="btn btn-ghost btn-sm" @onclick="MarcarTodas">Marcar todas</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _marcadas.Clear()">Limpar</button>
+                </div>
+            }
+        </div>
+
+        @foreach (var grupo in GruposDeContribuinte)
+        {
+            <div class="mt-3" data-grupo-permissoes="@grupo.Dominio">
+                <div class="fw-700 text-sm">@grupo.Dominio <span class="text-muted">— @grupo.Descricao</span></div>
+                <div class="perfis-lista">
+                    @foreach (var permissao in grupo.Permissoes)
+                    {
+                        var id = $"perm-{permissao.Chave.Replace('.', '-')}";
+                        <label class="perfil-opcao" for="@id">
+                            <input type="checkbox" id="@id" value="@permissao.Chave" checked="@_marcadas.Contains(permissao.Chave)" disabled="@SomenteLeitura"
+                                   @onchange="e => Alternar(permissao.Chave, e.Value)" />
+                            <span>
+                                <span class="fw-700">@permissao.Rotulo</span>
+                                @if (permissao.ExigeMfa)
+                                {
+                                    <span class="badge badge-warn ml-1">MFA</span>
+                                }
+                                <span class="perfil-opcao__desc mono">@permissao.Chave</span>
+                            </span>
+                        </label>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (!SomenteLeitura)
+        {
+            <div class="row gap-3 mt-4">
+                <button class="btn btn-primary" id="btn-salvar-perfil" @onclick="Salvar" disabled="@_executando">Salvar perfil</button>
+                <a class="btn btn-ghost" href="/admin/perfis">Cancelar</a>
+            </div>
+        }
+    </div>
+    <p class="text-sm text-muted">
+        As permissões de plataforma (backup, catálogo oficial, incidentes…) não entram em perfis: são do perfil global
+        Administrador da plataforma. Ninguém consegue pôr num perfil uma permissão que ele mesmo não tem.
+    </p>
+}
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "copiar")] public Guid? Copiar { get; set; }
+
+    private static readonly IReadOnlySet<string> DominiosDePlataforma =
+        new HashSet<string>(CatalogoPermissoesUi.Grupos.Where(g => g.Permissoes.All(p => Permissoes.EhPlataforma(p.Chave))).Select(g => g.Dominio), StringComparer.Ordinal);
+
+    private static IEnumerable<GrupoPermissoesUi> GruposDeContribuinte => CatalogoPermissoesUi.Grupos.Where(g => !DominiosDePlataforma.Contains(g.Dominio));
+
+    private bool _carregando = true;
+    private bool _executando;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemTenant;
+    private PerfilGestao? _existente;
+    private string _nome = string.Empty;
+    private string _descricao = string.Empty;
+    private readonly HashSet<string> _marcadas = new(StringComparer.Ordinal);
+
+    private bool SomenteLeitura => _existente is { DoSistema: true };
+
+    private string Titulo => Id is null ? "Novo perfil" : SomenteLeitura ? $"Perfil {_existente?.Nome}" : $"Editar perfil {_existente?.Nome}";
+
+    private IReadOnlyList<Migalha> _migalhas => [new Migalha("Administração", "/admin"), new Migalha("Perfis", "/admin/perfis"), new Migalha(Id is null ? "Novo" : _existente?.Nome ?? "Perfil")];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _carregando = true;
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            var (perfis, estado) = await Dados.ListarAsync();
+            _estado = estado;
+            _existente = Id is Guid id ? perfis.FirstOrDefault(p => p.Id == id) : null;
+            var modelo = _existente ?? (Copiar is Guid copiar ? perfis.FirstOrDefault(p => p.Id == copiar) : null);
+            _marcadas.Clear();
+            if (modelo is not null)
+            {
+                foreach (var chave in modelo.Permissoes.Where(c => !Permissoes.EhPlataforma(c)))
+                {
+                    _marcadas.Add(chave);
+                }
+            }
+
+            _nome = _existente?.Nome ?? (modelo is not null ? $"{modelo.Nome} (cópia)" : string.Empty);
+            _descricao = _existente?.Descricao ?? string.Empty;
+        }
+
+        _carregando = false;
+    }
+
+    private void Alternar(string chave, object? valor)
+    {
+        if (valor is true)
+        {
+            _marcadas.Add(chave);
+        }
+        else
+        {
+            _marcadas.Remove(chave);
+        }
+    }
+
+    private void MarcarTodas()
+    {
+        foreach (var permissao in GruposDeContribuinte.SelectMany(g => g.Permissoes))
+        {
+            _marcadas.Add(permissao.Chave);
+        }
+    }
+
+    private async Task Salvar()
+    {
+        if (_executando || SomenteLeitura)
+        {
+            return;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        try
+        {
+            resultado = _existente is null
+                ? await Dados.CriarAsync(_nome, _descricao, [.. _marcadas])
+                : await Dados.AlterarAsync(_existente.Id, _nome, _descricao, [.. _marcadas]);
+        }
+        finally
+        {
+            _executando = false;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (resultado.Sucesso)
+        {
+            Navegacao.NavigateTo("/admin/perfis");
+        }
+    }
+}

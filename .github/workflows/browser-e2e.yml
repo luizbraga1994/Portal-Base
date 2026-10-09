@@ -1,0 +1,69 @@
+name: Browser E2E
+
+# Prompt 54 — pipeline dedicado de Browser E2E (Playwright + Chromium) contra o host Web real.
+# Pipeline: BUILD → INSTALL BROWSER → PLAYWRIGHT (dotnet test) → RESULTS → ARTIFACTS.
+# Não duplica o CI principal (build/test unitário/SCA): este roda apenas a suíte de navegador.
+
+# Economia de minutos: suíte pesada só no PR para o master (e manualmente) — não roda a cada push de branch.
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+# Menor privilégio (Prompt 52): o job só lê o repositório; nada de escrita.
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+  # O host Web sobe em "Testing": em não-produção a conexão de banco não é obrigatória.
+  ASPNETCORE_ENVIRONMENT: 'Testing'
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj
+
+      - name: Build (warnings como erro)
+        run: dotnet build tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj -c Release -warnaserror --no-restore
+
+      # Instala SOMENTE o Chromium + libs do SO (a versão casa com o pacote Microsoft.Playwright).
+      - name: Instalar navegador (Chromium)
+        run: pwsh tests/PortalBase.BrowserE2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      # Executa a suíte de navegador REAL. Sem MySQL provisionado no runner, os fluxos autenticados
+      # ficam SKIPPED (BLOCKED) — não falham o pipeline e não são simulados.
+      - name: Playwright (Browser E2E)
+        run: >
+          dotnet test tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj
+          -c Release --no-build --verbosity normal
+          --logger "trx;LogFileName=browser-e2e.trx"
+          --results-directory artifacts/test-results
+
+      # Publica evidências em qualquer resultado. Os traces são gerados SEM "sources" e nenhuma página
+      # navegada carrega segredo/token/cookie de sessão — nada sensível é publicado (Fase 47).
+      - name: Publicar resultados e evidências
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-e2e-evidencias
+          path: |
+            artifacts/test-results/**
+            artifacts/e2e/**
+          if-no-files-found: ignore
+          retention-days: 7

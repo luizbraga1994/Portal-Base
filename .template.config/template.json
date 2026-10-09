@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Andersen Consulting",
+  "classifications": [ "Web", "Blazor", "Multi-tenant", "Template" ],
+  "identity": "PortalBase.Template",
+  "name": "Portal Base — portal multi-tenant (Blazor + MySQL)",
+  "description": "Base de portal multi-tenant: identidade com MFA, perfis e permissões, auditoria íntegra, cofre de segredos, upload com antivírus, backup/restore, observabilidade, Worker e a casca da tela (login, menu, usuários, perfis, tenant).",
+  "shortName": "portalbase",
+  "sourceName": "PortalBase",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "solution" },
+  "symbols": {
+    "nomeExibicao": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "Portal Base",
+      "replaces": "Portal Base",
+      "description": "Nome do portal exibido nas telas, e-mails e documentos (ex.: \"Portal Tributos\")."
+    },
+    "organizacao": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "Andersen Consulting",
+      "replaces": "Andersen Consulting",
+      "description": "Organização exibida na tela de entrada, nos e-mails e no rodapé."
+    },
+    "nomeMinusculo": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "minusculo",
+      "replaces": "portalbase",
+      "fileRename": "portalbase",
+      "description": "Prefixo técnico em minúsculas (bases portalbase_*, segredos portalbase-*, cookies, arquivos .css/.js)."
+    },
+    "nomeMaiusculo": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "maiusculo",
+      "replaces": "PORTALBASE",
+      "description": "Prefixo das variáveis de ambiente (PORTALBASE_*)."
+    },
+    "nomeCamelo": {
+      "type": "derived",
+      "valueSource": "name",
+      "valueTransform": "camelo",
+      "replaces": "portalBase",
+      "description": "Objeto JavaScript do portal (window.portalBase)."
+    }
+  },
+  "forms": {
+    "minusculo": { "identifier": "lowerCase" },
+    "maiusculo": { "identifier": "upperCase" },
+    "camelo": { "identifier": "firstLowerCase" }
+  },
+  "sources": [
+    {
+      "modifiers": [
+        {
+          "exclude": [ "**/bin/**", "**/obj/**", ".git/**", "**/.vs/**", "**/TestResults/**", "**/*.user", "artifacts/**", ".template.config/**" ]
+        }
+      ]
+    }
+  ],
+  "postActions": [],
+  "primaryOutputs": [ { "path": "PortalBase.sln" } ]
+}

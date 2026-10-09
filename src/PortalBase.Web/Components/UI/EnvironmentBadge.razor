@@ -1,0 +1,6 @@
+@* Indicador de ambiente (§11/§65): nunca esconder o ambiente. *@
+@inject IContextoApresentacao Contexto
+
+<span class="env-badge @Contexto.ClasseAmbiente" title="Ambiente de execução">
+    <span class="dot" aria-hidden="true"></span>@Contexto.RotuloAmbiente
+</span>

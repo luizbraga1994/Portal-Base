@@ -1,0 +1,23 @@
+@* KPI tile (§8/§73). Não depende só de cor: ícone + rótulo + valor. *@
+<div class="stat @(Acento ? "accent" : null)">
+    <div class="st-top">
+        <span class="st-label">@Rotulo</span>
+        @if (!string.IsNullOrEmpty(Icone))
+        {
+            <span class="st-icon" aria-hidden="true">@(System.Net.WebUtility.HtmlDecode(Icone))</span>
+        }
+    </div>
+    <div class="st-value tnum">@Valor</div>
+    @if (!string.IsNullOrEmpty(Rodape))
+    {
+        <div class="st-foot">@Rodape</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Rotulo { get; set; } = string.Empty;
+    [Parameter] public string Valor { get; set; } = string.Empty;
+    [Parameter] public string? Icone { get; set; }
+    [Parameter] public string? Rodape { get; set; }
+    [Parameter] public bool Acento { get; set; }
+}

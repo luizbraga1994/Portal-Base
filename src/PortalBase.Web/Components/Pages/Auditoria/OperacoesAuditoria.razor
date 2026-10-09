@@ -1,0 +1,140 @@
+@page "/auditoria/operacoes"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosAuditoria Dados
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Auditoria de operações · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Auditoria" Titulo="Auditoria de operações"
+            Subtitulo="Trilha append-only das operações do contribuinte por período (read-model ConsultaAuditoria). Consulta autorizada e auto-auditada no servidor; nunca exibe segredos.">
+    <Acoes><a class="btn btn-secondary btn-sm" href="/auditoria/eventos">Ver eventos &rsaquo;</a></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AuditoriaVisualizar))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Seu perfil não tem a permissão auditoria.visualizar. A decisão de acesso é validada no servidor.">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else
+{
+    @if (_r?.Estado == EstadoConsultaAuditoria.Demonstracao)
+    {
+        <div class="alert alert-warn mb-4" role="note">
+            <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+            <div><div class="a-title">Dados de demonstração</div>
+            <div class="a-body">Registros simulados. Com um contribuinte selecionado e banco disponível, esta tela consome o read-model real (<span class="mono">ConsultaAuditoriaAutorizada</span>).</div></div>
+        </div>
+    }
+
+    <div class="dt-wrap mb-4">
+        <div class="dt-toolbar wrap gap-2">
+            <FiltroPeriodo Rotulo="Ocorrido em" Desde="_desde" DesdeChanged="v => _desde = v" Ate="_ate" AteChanged="v => _ate = v" />
+            <input class="input mw-170" placeholder="Ação (ex.: TenantActivated)" value="@_acao" @oninput="e => _acao = e.Value?.ToString() ?? string.Empty" aria-label="Ação" />
+            <input class="input mw-240" placeholder="Ator (nome, login, e-mail)" value="@_ator" @oninput="e => _ator = e.Value?.ToString() ?? string.Empty" aria-label="Ator" />
+            <input class="input mw-150" placeholder="Recurso" value="@_recurso" @oninput="e => _recurso = e.Value?.ToString() ?? string.Empty" aria-label="Tipo de recurso" />
+            <select class="select mw-150" value="@_resultado" @onchange="e => _resultado = e.Value?.ToString() ?? string.Empty" aria-label="Resultado">
+                <option value="Todos">Todos os resultados</option>
+                <option value="Permitido">Permitido</option><option value="Negado">Negado</option>
+            </select>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" @onclick="Limpar">Limpar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Filtrar" disabled="@(!PeriodoUi.EhValido(_desde, _ate))">Filtrar</button>
+        </div>
+
+        @if (_carga.EmAndamento)
+        {
+            <div class="state"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando a trilha…</p></div>
+        }
+        else if (_r is null || _r.Estado == EstadoConsultaAuditoria.SemTenant)
+        {
+            <EmptyState Emoji="&#127970;" Titulo="Selecione um contribuinte"
+                        Mensagem="A auditoria é consultada no contexto de um contribuinte autorizado." />
+        }
+        else if (_r.Estado == EstadoConsultaAuditoria.Erro)
+        {
+            <div class="state" role="alert"><div class="st-emoji" aria-hidden="true">&#9888;&#65039;</div>
+                <h3>Não foi possível consultar a auditoria</h3>
+                <p>A consulta falhou ou o acesso não foi autorizado. Nenhum detalhe interno é exibido.</p></div>
+        }
+        else if (_r.Itens.Count == 0)
+        {
+            <EmptyState Emoji="&#128269;" Titulo="Nenhum registro para o filtro" Mensagem="Ajuste os filtros ou o período." />
+        }
+        else
+        {
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th class="w-150">Data (UTC)</th><th>Ator</th><th>Ação</th><th>Recurso</th><th>Resultado</th><th>Motivo</th><th>Correlation</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _r.Itens)
+                        {
+                            <tr>
+                                <td class="text-sm mono">@r.OcorridoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td title="@($"Identificador: {r.Ator}")"><div class="fw-700">@r.AtorExibido</div><div class="text-xs text-muted">@r.DescricaoAtor</div></td>
+                                <td class="mono text-sm">@r.Acao</td>
+                                <td class="text-sm">@(r.Recurso ?? "—")</td>
+                                <td><StatusBadge Texto="@r.Resultado" Situacao="@(r.Permitido ? "ok" : "bad")" /></td>
+                                <td class="text-sm text-muted">@(r.Motivo ?? "—")</td>
+                                <td class="mono text-xs text-muted">@(r.CorrelationId ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <Paginacao Pagina="_r.Pagina" TamanhoPagina="_r.TamanhoPagina" Total="_r.Total"
+                       Rotulo="registros" OnAnterior="Anterior" OnProxima="Proxima" />
+        }
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Auditoria", "/auditoria/eventos"), new Migalha("Operações")];
+
+    private DateTimeOffset? _desde;
+    private DateTimeOffset? _ate;
+    private string _acao = string.Empty;
+    private string _ator = string.Empty;
+    private string _recurso = string.Empty;
+    private string _resultado = "Todos";
+    private int _pagina = 1;
+    private readonly CargaCoalescente _carga = new();
+    private ResultadoAuditoriaVm? _r;
+
+    private int TotalPaginas => _r is null || _r.TamanhoPagina < 1
+        ? 1
+        : (int)Math.Max(1, Math.Ceiling(_r.Total / (double)_r.TamanhoPagina));
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.AuditoriaVisualizar)) { await Carregar(); }
+    }
+
+    private async Task Filtrar() { _pagina = 1; await Carregar(); }
+
+    private async Task Limpar() { _desde = _ate = null; _acao = _ator = _recurso = string.Empty; _resultado = "Todos"; _pagina = 1; await Carregar(); }
+
+    private async Task Anterior() { if (_pagina > 1) { _pagina--; await Carregar(); } }
+
+    private async Task Proxima() { if (_pagina < TotalPaginas) { _pagina++; await Carregar(); } }
+
+    // Uma carga por vez (o DbContext do circuito não aceita duas consultas simultâneas — UI-003) e nenhum pedido se
+    // perde: filtro, página ou limpeza pedidos durante uma carga são feitos com os valores atuais antes de ela
+    // terminar, e só o resultado mais recente é exibido.
+    private Task Carregar()
+    {
+        // Prompt 81: Desde > Até NÃO consulta (o FiltroPeriodo exibe a mensagem; o servidor também rejeita).
+        if (!PeriodoUi.EhValido(_desde, _ate)) { return Task.CompletedTask; }
+
+        return _carga.ExecutarAsync(
+            () => Dados.ConsultarAsync(new FiltroAuditoriaVm
+            {
+                Desde = _desde, Ate = _ate,
+                Ator = _ator, Acao = _acao, TipoRecurso = _recurso, Resultado = _resultado,
+                Pagina = _pagina, TamanhoPagina = 25,
+            }),
+            r => _r = r);
+    }
+}

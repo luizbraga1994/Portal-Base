@@ -1,0 +1,23 @@
+@* Trilha de navegação (§61). Último item é o atual (sem link). *@
+@if (Itens is { Count: > 0 })
+{
+    <nav class="breadcrumbs" aria-label="Trilha">
+        <a href="/">Início</a>
+        @foreach (var m in Itens)
+        {
+            <span class="sep" aria-hidden="true">/</span>
+            @if (!string.IsNullOrEmpty(m.Href))
+            {
+                <a href="@m.Href">@m.Rotulo</a>
+            }
+            else
+            {
+                <span class="cur" aria-current="page">@m.Rotulo</span>
+            }
+        }
+    </nav>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<Migalha>? Itens { get; set; }
+}

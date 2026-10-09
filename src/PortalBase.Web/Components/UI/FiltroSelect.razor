@@ -1,0 +1,33 @@
+@* Filtro <select> reutilizável (Prompt 75, Fase 3). Consolida o padrão repetido em ~20 telas:
+   um sentinela "Todos/Todas" (→ null no facade) + opções DERIVADAS de OpcoesFiltro (anti-drift).
+   Só apresentação: dispara ValorChanged (suporta @bind-Valor); a autorização/consulta é do SERVIDOR. *@
+<select class="select @Classe" value="@Valor" @onchange="AoMudar" aria-label="@AriaLabel">
+    <option value="@ValorTodos">@RotuloTodos</option>
+    @foreach (var o in Opcoes)
+    {
+        <option value="@o.Valor">@o.Rotulo</option>
+    }
+</select>
+
+@code {
+    /// <summary>Valor selecionado (nome do enum, ou o sentinela). Suporta <c>@bind-Valor</c>.</summary>
+    [Parameter] public string Valor { get; set; } = "Todos";
+
+    [Parameter] public EventCallback<string> ValorChanged { get; set; }
+
+    /// <summary>Opções curadas (Valor = nome do enum; Rotulo = pt-BR), tipicamente de <c>OpcoesFiltro</c>.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<OpcaoFiltro> Opcoes { get; set; } = [];
+
+    /// <summary>Rótulo do sentinela (ex.: "Todas as situações").</summary>
+    [Parameter] public string RotuloTodos { get; set; } = "Todos";
+
+    /// <summary>Valor do sentinela enviado ao facade (que o traduz para "sem filtro"). Padrão "Todos".</summary>
+    [Parameter] public string ValorTodos { get; set; } = "Todos";
+
+    [Parameter] public string? AriaLabel { get; set; }
+
+    /// <summary>Classes CSS extras (ex.: largura utilitária <c>mw-170</c>) — nunca estilo inline.</summary>
+    [Parameter] public string? Classe { get; set; }
+
+    private Task AoMudar(ChangeEventArgs e) => ValorChanged.InvokeAsync(e.Value?.ToString() ?? ValorTodos);
+}

@@ -1,0 +1,125 @@
+@page "/admin"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IAutorizacaoVisual Visual
+@inject PortalBase.Web.Seguranca.SelecaoTenant Selecao
+@inject IDadosOperacoes Operacoes
+
+<PageTitle>Administração · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Centro de administração"
+            Subtitulo="Estado real dos componentes administrados e acesso às áreas. Cada área declara honestamente se está ligada ao backend, parcial ou pendente." />
+
+@if (!PodeAlgumaAdmin)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem acesso administrativo"
+        Mensagem="Seu perfil não possui nenhuma permissão administrativa (admin.tenant / admin.usuarios). A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else
+{
+    @* CONTEXTO — tenant ativo (fonte real: seleção server-side). *@
+    <div class="grid grid-3 mb-4">
+        <StatCard Rotulo="Contribuinte ativo" Valor="@(Selecao.TenantAtual is { } t ? "Selecionado" : "Nenhum")" Icone="&#127970;"
+                  Acento="@(Selecao.TenantAtual is not null)" />
+        <StatCard Rotulo="Áreas ligadas ao backend" Valor="@AreasAdministracao.Ligadas.ToString(_cultura)" Icone="&#128279;" />
+        <StatCard Rotulo="Áreas com lacuna registrada" Valor="@AreasAdministracao.ComLacuna.ToString(_cultura)" Icone="&#128736;&#65039;" />
+    </div>
+
+    @* OPERAÇÃO — saúde de workers/integrações (read-model real do P67), só com a permissão de plataforma. *@
+    <div class="card card-pad mb-4">
+        <div class="card-head plain"><h3 class="h-95">Operação (workers e integrações)</h3></div>
+        @if (!Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+        {
+            <p class="text-sm text-muted mt-3 mtx-06">
+                A visão operacional exige a permissão de plataforma (<span class="mono">seguranca.incidentes.gerir</span>).
+            </p>
+        }
+        else if (_carregandoOps)
+        {
+            <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando operação…</p></div>
+        }
+        else if (_painel is null)
+        {
+            <p class="text-sm text-muted mt-3 mtx-06">Não foi possível consultar a operação (ou não autorizado).</p>
+        }
+        else
+        {
+            <div class="grid grid-4 mt-3">
+                <StatCard Rotulo="Workers" Valor="@_painel.Workers.Count.ToString(_cultura)" Icone="&#129302;" />
+                <StatCard Rotulo="Estagnados" Valor="@_painel.WorkersEstagnados.ToString(_cultura)" Icone="&#9888;&#65039;"
+                          Acento="@(_painel.WorkersEstagnados > 0)" />
+                <StatCard Rotulo="Integrações degradadas" Valor="@_painel.IntegracoesDegradadas.ToString(_cultura)" Icone="&#128268;"
+                          Acento="@(_painel.IntegracoesDegradadas > 0)" />
+                <StatCard Rotulo="Sem telemetria" Valor="@(_painel.WorkersSemTelemetria ? "Sim" : "Não")" Icone="&#128225;" />
+            </div>
+            @if (_painel.WorkersSemTelemetria)
+            {
+                <p class="text-sm text-muted mtx-06">
+                    Nenhum worker registrou saúde no catálogo — o host Worker não está rodando? Ausência de informação NÃO é "saudável" (ver Operações → Workers).
+                </p>
+            }
+            <div class="row gap-2 mt-3">
+                <a class="btn btn-secondary btn-sm" href="/operacoes/workers">Workers</a>
+                <a class="btn btn-secondary btn-sm" href="/operacoes/saude">Saúde</a>
+                <a class="btn btn-secondary btn-sm" href="/operacoes/integracoes">Integrações</a>
+            </div>
+        }
+    </div>
+
+    @* ÁREAS ADMINISTRATIVAS — cada uma declara o estado real (ligada / config / parcial / lacuna). *@
+    <div class="card card-pad">
+        <div class="card-head plain"><h3 class="h-95">Áreas administrativas</h3></div>
+        <div class="dt-scroll mt-3">
+            <table class="dt">
+                <thead><tr><th>Área</th><th>Estado</th><th>Observação</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var area in AreasAdministracao.Todas)
+                    {
+                        <tr>
+                            <td class="fw-700">@area.Titulo</td>
+                            <td><StatusBadge Texto="@area.EstadoRotulo" Situacao="@area.EstadoBadge" /></td>
+                            <td class="text-sm text-muted">@area.Observacao</td>
+                            <td>
+                                @if (area.Rota is { Length: > 0 } rota && Visual.Pode(area.Permissao))
+                                {
+                                    <a class="btn btn-ghost btn-sm" href="@rota">Abrir</a>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Administração")];
+    private static readonly CultureInfo _cultura = CultureInfo.GetCultureInfo("pt-BR");
+
+    private bool _carregandoOps;
+    private PainelOperacoesVm? _painel;
+
+    private bool PodeAlgumaAdmin =>
+        Visual.Pode(Permissoes.AdminTenant) || Visual.Pode(Permissoes.AdminUsuarios);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (PodeAlgumaAdmin && Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+        {
+            _carregandoOps = true;
+            try
+            {
+                var (painel, _) = await Operacoes.ObterPainelAsync();
+                _painel = painel;
+            }
+            finally { _carregandoOps = false; }
+        }
+    }
+}

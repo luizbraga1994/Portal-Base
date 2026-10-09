@@ -1,0 +1,12 @@
+@using PortalBase.Web.Ui.Dados
+@* Quadro do resultado de uma ação (sucesso ou falha), com texto e cor — nunca só cor. *@
+<div id="@Id" class="alert @(R.Sucesso ? "alert-ok" : "alert-warn") mt-3" role="@(R.Sucesso ? "status" : "alert")" aria-live="polite">
+    <span class="a-icon" aria-hidden="true">@(R.Sucesso ? "✅" : "⚠️")</span>
+    <div><div class="a-title">@R.Titulo</div><div class="a-body">@R.Mensagem</div></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Id { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired] public ResultadoAcaoVm R { get; set; } = default!;
+}

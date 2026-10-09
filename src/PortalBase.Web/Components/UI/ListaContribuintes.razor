@@ -1,0 +1,86 @@
+@* Escolha de contribuintes (caixas de seleção) para dar acesso a um usuário em vários. Só apresentação: a lista vem do
+   servidor (só os contribuintes que quem pede administra) e quem decide cada concessão/revogação é o servidor, ao salvar.
+   O contribuinte da sessão aparece marcado e travado (ele tem os próprios controles na tela). *@
+@using PortalBase.Application.Identidade
+
+<div class="dt-scroll">
+    <table class="dt" id="@Id">
+        <thead>
+            <tr>
+                <th>Acesso</th><th>Contribuinte</th><th>CNPJ</th>
+                @if (MostrarSituacao)
+                {
+                    <th>Hoje</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var c in Itens)
+            {
+                var id = $"{Prefixo}-contribuinte-{c.TenantId:N}";
+                <tr data-contribuinte="@c.Nome">
+                    <td>
+                        <input type="checkbox" id="@id" checked="@(c.Atual || Marcados.Contains(c.TenantId))" disabled="@(c.Atual || Desabilitado)"
+                               aria-label="@($"Acesso a {c.Nome}")" @onchange="e => Alternar(c.TenantId, e.Value)" />
+                    </td>
+                    <td>
+                        <label for="@id" class="fw-700">@c.Nome</label>
+                        @if (c.Atual)
+                        {
+                            <span class="badge badge-neutral ml-1">este</span>
+                        }
+                        @if (!c.Operacional)
+                        {
+                            <span class="badge badge-warn ml-1" title="Desativado ou ainda em preparação">indisponível</span>
+                        }
+                        <div class="text-sm text-muted">@c.RazaoSocial</div>
+                    </td>
+                    <td class="text-sm mono">@c.Cnpj</td>
+                    @if (MostrarSituacao)
+                    {
+                        <td class="text-sm">@Situacao(c)</td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<ContribuinteDoUsuario> Itens { get; set; } = [];
+
+    [Parameter] public HashSet<Guid> Marcados { get; set; } = [];
+
+    [Parameter] public string Prefixo { get; set; } = "lista";
+
+    [Parameter] public string? Id { get; set; }
+
+    [Parameter] public bool Desabilitado { get; set; }
+
+    /// <summary>Mostra a coluna "Hoje" (situação e perfis atuais do usuário em cada contribuinte).</summary>
+    [Parameter] public bool MostrarSituacao { get; set; }
+
+    [Parameter] public EventCallback OnAlterado { get; set; }
+
+    private async Task Alternar(Guid id, object? valor)
+    {
+        if (valor is true)
+        {
+            Marcados.Add(id);
+        }
+        else
+        {
+            Marcados.Remove(id);
+        }
+
+        await OnAlterado.InvokeAsync();
+    }
+
+    private static string Situacao(ContribuinteDoUsuario c) => c switch
+    {
+        { Atual: true } => "perfis acima",
+        { Situacao: SituacaoNoContribuinte.Ativo } => c.Perfis.Count == 0 ? "com acesso, sem perfil" : string.Join(", ", c.Perfis.Select(p => p.Nome)),
+        { Situacao: SituacaoNoContribuinte.Revogado } => "acesso revogado",
+        _ => "sem acesso",
+    };
+}

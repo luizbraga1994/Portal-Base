@@ -1,0 +1,209 @@
+@page "/admin/usuarios"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosUsuariosAdmin Dados
+@inject IDadosAcoesUsuario Acoes
+@inject IAutorizacaoVisual Visual
+@inject ServicoNotificacoes Notificacoes
+
+<PageTitle>Usuários · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Usuários do contribuinte"
+            Subtitulo="Usuários VINCULADOS ao contribuinte selecionado (read-model autorizado). Metadados administrativos — nunca senha, segredo de MFA ou dados de outro contribuinte.">
+    <Acoes>
+        <button class="btn btn-secondary btn-sm" @onclick="Atualizar" disabled="@_carregando">Atualizar</button>
+        @if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            <a class="btn btn-primary btn-sm" id="btn-novo-usuario" href="/admin/usuarios/novo">+ Novo usuário</a>
+        }
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Ver os usuários exige a permissão admin.usuarios. A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else
+{
+    <div class="dt-wrap mb-4">
+        <div class="dt-toolbar">
+            <input class="input mw-240" placeholder="Buscar login/nome/e-mail"
+                   value="@_busca" @oninput="e => _busca = e.Value?.ToString() ?? string.Empty" aria-label="Busca" />
+            <select class="select mw-150" value="@_status" @onchange="e => _status = e.Value?.ToString() ?? string.Empty" aria-label="Status">
+                <option value="Todos">Todos os status</option>
+                @foreach (var s in UsuariosAdminUi.OpcoesStatus) { <option value="@s">@s</option> }
+            </select>
+            <select class="select mw-170" value="@_acesso" @onchange="e => _acesso = e.Value?.ToString() ?? string.Empty" aria-label="Acesso ao contribuinte">
+                <option value="Todos">Todo acesso</option>
+                @foreach (var s in UsuariosAdminUi.OpcoesAcesso) { <option value="@s">Acesso: @s</option> }
+            </select>
+            <select class="select mw-170" value="@_ordenacao" @onchange="e => _ordenacao = e.Value?.ToString() ?? string.Empty" aria-label="Ordenar por">
+                @foreach (var o in UsuariosAdminUi.OpcoesOrdenacao) { <option value="@o">Ordenar: @o</option> }
+            </select>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" @onclick="Limpar">Limpar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Filtrar">Filtrar</button>
+        </div>
+
+        <EstadoConsultaView Estado="_r?.Estado ?? EstadoConsultaUi.SemTenant" Carregando="_carregando"
+                            Vazio="_r is not null && _r.Itens.Count == 0"
+                            TituloVazio="Nenhum usuário encontrado"
+                            MensagemVazio="Ajuste os filtros ou verifique se há usuários vinculados a este contribuinte.">
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead>
+                        <tr>
+                            <th>Login</th><th>Nome</th><th>E-mail</th><th>Status</th><th>Acesso</th>
+                            <th>MFA</th><th>Perfis</th><th>Último acesso</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in _r!.Itens)
+                        {
+                            <tr>
+                                <td class="fw-700 mono">@u.Login</td>
+                                <td>@u.Nome</td>
+                                <td class="text-sm">@u.Email</td>
+                                <td><StatusBadge Texto="@u.StatusRotulo" Situacao="@u.StatusBadge" /></td>
+                                <td><StatusBadge Texto="@u.AcessoRotulo" Situacao="@u.AcessoBadge" /></td>
+                                <td>@(u.MfaHabilitado ? "Sim" : "Não")</td>
+                                <td class="text-sm">
+                                    @(string.IsNullOrEmpty(u.Papeis) ? "—" : u.Papeis)
+                                    @if (u.AdministradorPlataforma)
+                                    {
+                                        <span class="badge badge-primary ml-1" title="Acesso total a todos os contribuintes e à plataforma">Admin. da plataforma</span>
+                                    }
+                                </td>
+                                <td class="text-sm mono">@(u.UltimoAcessoUtc is { } a ? a.ToString("dd/MM/yyyy HH:mm", _ci) : "—")</td>
+                                <td class="text-sm ws-nowrap">
+                                    <a href="@($"/admin/usuarios/{u.UsuarioId}")">Editar</a>
+                                    @if (u.AcessoBadge == "ok")
+                                    {
+                                        <span> · </span>
+                                        <button class="btn btn-ghost btn-sm" @onclick="() => PedirRevogacao(u)">Revogar</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <Paginacao Pagina="_r.Pagina" TamanhoPagina="_r.TamanhoPagina" Total="_r.Total"
+                       Rotulo="usuário(s)" OnAnterior="Anterior" OnProxima="Proxima" />
+        </EstadoConsultaView>
+    </div>
+
+    <p class="text-muted text-sm">
+        Use <strong>+ Novo usuário</strong> para cadastrar alguém (ou dar acesso a quem já usa o portal em outro contribuinte) e
+        <strong>Editar</strong> para alterar dados, perfis, situação, senha ou excluir. Revogar o acesso invalida as sessões do
+        usuário neste contribuinte. Tudo é conferido e auditado no servidor.
+    </p>
+
+    <ConfirmacaoAcao Visivel="_alvo is not null" Perigoso="true" Processando="_executando"
+                     Titulo="Revogar acesso do usuário?"
+                     Mensagem="@($"O usuário '{_alvo?.Login}' perderá o acesso a este contribuinte e suas sessões serão invalidadas. A operação é auditada.")"
+                     TextoConfirmar="Revogar acesso"
+                     OnConfirmar="ConfirmarRevogacao" OnCancelar="() => _alvo = null" />
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Administração", "/admin"), new Migalha("Usuários")];
+    private static readonly CultureInfo _ci = CultureInfo.InvariantCulture;
+
+    private string _busca = string.Empty;
+    private string _status = "Todos";
+    private string _acesso = "Todos";
+    private string _ordenacao = nameof(PortalBase.Application.Administracao.CampoOrdenacaoUsuario.Login);
+    private int _pagina = 1;
+    private bool _carregando;
+    private bool _executando;
+    private ResultadoListaVm<UsuarioAdminItemVm>? _r;
+    private UsuarioAdminItemVm? _alvo;
+
+    private int TotalPaginas => _r is null || _r.TamanhoPagina < 1 ? 1 : _r.TotalPaginas;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            await Carregar();
+        }
+    }
+
+    private async Task Filtrar() { _pagina = 1; await Carregar(); }
+
+    private async Task Atualizar() => await Carregar();
+
+    private async Task Limpar()
+    {
+        _busca = string.Empty;
+        _status = _acesso = "Todos";
+        _ordenacao = nameof(PortalBase.Application.Administracao.CampoOrdenacaoUsuario.Login);
+        _pagina = 1;
+        await Carregar();
+    }
+
+    private async Task Anterior() { if (_pagina > 1) { _pagina--; await Carregar(); } }
+
+    private async Task Proxima() { if (_pagina < TotalPaginas) { _pagina++; await Carregar(); } }
+
+    private async Task Carregar()
+    {
+        if (_carregando)
+        {
+            return;
+        }
+
+        _carregando = true;
+        var filtro = new FiltroUsuariosAdminVm
+        {
+            Busca = string.IsNullOrWhiteSpace(_busca) ? null : _busca,
+            Status = _status,
+            StatusAcesso = _acesso,
+            Ordenacao = _ordenacao,
+            Descendente = false,
+            Pagina = _pagina,
+            TamanhoPagina = 25,
+        };
+
+        try
+        {
+            _r = await Dados.ListarAsync(filtro);
+        }
+        finally
+        {
+            _carregando = false;
+        }
+    }
+
+    private void PedirRevogacao(UsuarioAdminItemVm u) => _alvo = u;
+
+    private async Task ConfirmarRevogacao()
+    {
+        if (_alvo is null || _executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        try
+        {
+            resultado = await Acoes.RevogarAcessoAsync(_alvo.UsuarioId);
+        }
+        finally
+        {
+            _executando = false;
+            _alvo = null;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (resultado.Sucesso)
+        {
+            await Carregar();
+        }
+    }
+}

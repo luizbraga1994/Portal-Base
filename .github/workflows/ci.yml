@@ -1,0 +1,110 @@
+name: CI
+
+# Economia de minutos: o push já valida o commit que o PR mostra — o gatilho pull_request duplicava a execução.
+on:
+  push:
+    branches: [ master, 'claude/**' ]
+  workflow_dispatch:
+
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+
+jobs:
+  build-e-testes:
+    runs-on: ubuntu-latest
+
+    # Prompt 07 — MySQL real (serviço) para DESTRAVAR os testes de isolamento/autorização
+    # (FixtureMultiTenant), incluindo AuthorizationIsolationTests: A↛B, IDOR por tenantId manipulado,
+    # RBAC (papel insuficiente), step-up de MFA, revogação, tenant desabilitado. Sem isto esses testes
+    # ficavam SKIPPED e a prova A↛B nunca executava no CI (GAP_INTERNO). Senha efêmera do serviço —
+    # não é segredo de produção (recriada a cada run; alcançável só dentro do job).
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root_pwd
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root --password=ci_root_pwd"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore PortalBase.sln
+
+      - name: Build (Release, warnings como erro)
+        run: dotnet build PortalBase.sln -c Release -warnaserror --no-restore
+
+      - name: Testes unitários (Domain)
+        run: dotnet test tests/PortalBase.Domain.Tests -c Release --no-build --verbosity normal
+
+      - name: Testes unitários (Application)
+        run: dotnet test tests/PortalBase.Application.Tests -c Release --no-build --verbosity normal
+
+      # Integração contra MySQL REAL: Testcontainers (auto-provisionado, gated por Docker) + FixtureMultiTenant
+      # (serviço mysql acima, via PORTALBASE_TEST_MYSQL_ADMIN) — executa a prova de isolamento/IDOR/RBAC/MFA
+      # (Prompt 07: AuthorizationIsolationTests, TenantIsolation, AuditoriaTrail cross-tenant). Sem a env var,
+      # os ~89 testes FixtureMultiTenant ficavam SKIPPED.
+      - name: Testes de integração — MySQL real (Testcontainers + isolamento/autorização)
+        env:
+          # SslMode=Disabled: valor do provider Oracle MySql.Data (o enum MySqlSslMode NÃO tem 'None' —
+          # 'None' lançava ArgumentException no fixture e derrubava os ~93 testes MySQL). AllowPublicKeyRetrieval
+          # permite o handshake caching_sha2_password do mysql:8.4 sobre conexão não-TLS (serviço efêmero do CI).
+          PORTALBASE_TEST_MYSQL_ADMIN: 'Server=127.0.0.1;Port=3306;Uid=root;Pwd=ci_root_pwd;SslMode=Disabled;AllowPublicKeyRetrieval=true'
+        run: dotnet test tests/PortalBase.Integration.Tests -c Release --no-build --verbosity normal
+
+      # SCA: falha o build em pacotes vulneráveis Critical/High (Prompt 30, §64).
+      - name: Análise de dependências vulneráveis (gate Critical/High)
+        run: |
+          saida=$(dotnet list PortalBase.sln package --vulnerable --include-transitive 2>&1)
+          echo "$saida"
+          if echo "$saida" | grep -qiE "Critical|High"; then
+            echo "::error::Pacotes vulneráveis (Critical/High) detectados — corrija antes de mesclar."
+            exit 1
+          fi
+          echo "Nenhum pacote vulnerável Critical/High."
+
+      # Secret scanning nativo: bloqueia segredos versionados (Prompt 30, §37/§64). Não imprime o segredo.
+      - name: Varredura de segredos (padrões proibidos)
+        run: |
+          if grep -rnI --include='*.cs' --include='*.json' --include='*.yml' --include='*.yaml' --include='*.props' \
+             -E '(-----BEGIN (RSA |EC |OPENSSH |ENCRYPTED |)PRIVATE KEY-----|xox[baprs]-[0-9A-Za-z-]{10,}|ghp_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})' \
+             src/ 2>/dev/null | grep -vE '/(bin|obj)/'; then
+            echo "::error::Possível segredo versionado detectado (ver arquivo/linha acima)."
+            exit 1
+          fi
+          echo "Nenhum padrão de segredo versionado encontrado."
+
+  imagens-docker:
+    runs-on: ubuntu-latest
+    needs: build-e-testes
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build da imagem Web
+        run: docker build -f Dockerfile.Web -t portalbase-web:ci .
+
+      - name: Build da imagem Worker
+        run: docker build -f Dockerfile.Worker -t portalbase-worker:ci .
+
+  # NENHUM deploy automático de produção: exige configuração explícita e é
+  # tratado fora deste pipeline (regra de escopo do Prompt 01).

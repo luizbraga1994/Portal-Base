@@ -1,0 +1,55 @@
+@page "/conta/entrar"
+@layout LayoutEntrada
+
+<PageTitle>Entrar · Portal Base</PageTitle>
+
+<h1 class="auth__title">Entrar</h1>
+<p class="auth__subtitle">Acesse o portal com suas credenciais.</p>
+
+@if (Redefinida == 1)
+{
+    <div class="alert alert-ok mb-4" role="status">
+        <span class="a-icon" aria-hidden="true">&#9989;</span>
+        <div class="a-body">Senha redefinida. Entre com o seu e-mail e a nova senha.</div>
+    </div>
+}
+
+@if (Mfa == "cadastrado")
+{
+    <div class="alert alert-ok mb-4" role="status" id="aviso-mfa-cadastrado">
+        <span class="a-icon" aria-hidden="true">&#9989;</span>
+        <div class="a-body">Verificação em duas etapas cadastrada. Entre de novo com o seu e-mail, a senha e o código do aplicativo.</div>
+    </div>
+}
+
+@if (Erro == 1)
+{
+    <div class="alert alert-bad mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+        <div class="a-body">Credenciais inválidas ou conta bloqueada. Verifique e tente novamente.</div>
+    </div>
+}
+
+<form method="post" action="/conta/login">
+    <AntiforgeryToken />
+    <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+    <div class="field">
+        <label for="email">E-mail</label>
+        <input class="input" id="email" name="email" type="email" maxlength="256" autocomplete="username" autofocus required />
+    </div>
+    @* O link APARECE ao lado do rótulo da senha (onde se procura por ele), mas vem DEPOIS do campo no HTML: com o Tab,
+       o foco vai do e-mail direto para a senha (acessibilidade) e só então para o link. *@
+    <div class="field field-com-link">
+        <label for="senha">Senha</label>
+        <input class="input" id="senha" name="senha" type="password" autocomplete="current-password" required />
+        <a class="link-forte" id="link-esqueci-senha" href="/conta/esqueci-senha">Esqueci minha senha</a>
+    </div>
+    <button class="btn btn-primary w-full" type="submit">Entrar</button>
+</form>
+
+@code {
+    [SupplyParameterFromQuery] public int Erro { get; set; }
+    [SupplyParameterFromQuery] public int Redefinida { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Mfa { get; set; }
+}

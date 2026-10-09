@@ -1,0 +1,106 @@
+@inherits LayoutComponentBase
+@using System.Security.Claims
+@using PortalBase.Web.Seguranca
+@inject IAutorizacaoVisual Visual
+@inject NavigationManager Navegacao
+@inject PortadorPrincipalCircuito Portador
+@inject SelecaoTenant Selecao
+
+@* Área autenticada do portal. Fluxo em duas etapas: (1) sem principal → redireciona ao login;
+   (2) autenticado mas SEM contribuinte selecionado → redireciona à seleção de contribuinte. Só com
+   identidade + contribuinte ativo o shell é renderizado. As telas de conta usam LayoutEntrada/
+   LayoutAutenticacao, portanto não há laço de redirecionamento. A decisão de autorização continua
+   no servidor/camada de dados (defense in depth). *@
+@if (_pronto)
+{
+    @* Recolher (desktop) e gaveta (celular) são estado de APRESENTAÇÃO aplicado por wwwroot/js/portalbase.js: este
+       layout é renderizado no servidor (estático), então @onclick aqui nunca dispararia. *@
+    <div class="app-shell">
+        <BarraSuperior OnPerfilAlterado="TrocarPerfil" />
+        <NavLateral Grupos="_grupos" />
+        <main class="main">
+            <div class="content">
+                @Body
+            </div>
+        </main>
+        <div class="scrim" data-ui="fechar-nav" aria-hidden="true"></div>
+        @* Interativo: as páginas interativas compartilham o MESMO circuito (e o mesmo ServicoNotificacoes) com este
+           host, então o retorno das ações ("Perfis salvos", "Acesso revogado"…) aparece. No layout estático ele nunca
+           era redesenhado depois de uma ação (OBS-P62R1-03). *@
+        <ToastHost @rendermode="InteractiveServer" />
+    </div>
+}
+
+<div id="blazor-error-ui" data-nosnippet>
+    Ocorreu um erro inesperado.
+    <a href="." class="reload">Recarregar</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? EstadoAutenticacao { get; set; }
+
+    private bool _pronto;
+    private IReadOnlyList<GrupoNavegacao> _grupos = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var usuario = EstadoAutenticacao is not null ? (await EstadoAutenticacao).User : null;
+
+        if (usuario?.Identity?.IsAuthenticated != true)
+        {
+            RedirecionarPara("conta/entrar");
+            return;
+        }
+
+        // Semeia o principal no circuito para o contexto de segurança do servidor funcionar sem HttpContext.
+        Portador.Definir(usuario);
+
+        // Etapa 2: sem contribuinte selecionado, vai escolher (um usuário pode ter vínculo com vários). Exceção: as
+        // telas de PLATAFORMA que não leem dado de contribuinte (cadastrar o primeiro contribuinte, e-mail) abrem para
+        // quem tem a permissão de plataforma — numa instalação nova não há contribuinte para escolher. O menu mostra só
+        // essas telas; sem a permissão, segue para a seleção como sempre.
+        var tenantClaim = usuario.FindFirst(ClaimsPortalBase.TenantSelecionado)?.Value;
+        if (!Guid.TryParse(tenantClaim, out var tenantId))
+        {
+            var caminho = Navegacao.ToBaseRelativePath(Navegacao.Uri);
+            if (NavegacaoPortal.AbreSemContribuinte(caminho))
+            {
+                await Visual.HidratarAsync(); // sem tenant, o provedor projeta só permissões de plataforma (fail-closed)
+                var grupos = NavegacaoPortal.FiltrarSemContribuinte(Visual);
+                if (NavegacaoPortal.ItemAtivo(grupos, caminho) is not null)
+                {
+                    _grupos = grupos;
+                    _pronto = true;
+                    return;
+                }
+            }
+
+            RedirecionarPara("conta/selecionar");
+            return;
+        }
+
+        // Hidrata o contexto do tenant a partir da escolha persistida (fail-closed, re-validado no servidor).
+        await Selecao.HidratarAsync(tenantId);
+
+        // Prompt 71 (F70-CRIT-01): projeção REAL das permissões efetivas do usuário no tenant corrente,
+        // resolvida no servidor (fail-closed). Só depois filtramos o menu e liberamos o render das páginas —
+        // portanto toda página vê o conjunto já hidratado quando chama Visual.Pode(...).
+        await Visual.HidratarAsync();
+
+        _grupos = NavegacaoPortal.Filtrar(Visual);
+        _pronto = true;
+    }
+
+    private void RedirecionarPara(string rota)
+    {
+        var destino = Uri.EscapeDataString("/" + Navegacao.ToBaseRelativePath(Navegacao.Uri));
+        Navegacao.NavigateTo($"{rota}?returnUrl={destino}", replace: true);
+    }
+
+    private void TrocarPerfil(string perfil)
+    {
+        Visual.DefinirPerfil(perfil);
+        _grupos = NavegacaoPortal.Filtrar(Visual);
+    }
+}

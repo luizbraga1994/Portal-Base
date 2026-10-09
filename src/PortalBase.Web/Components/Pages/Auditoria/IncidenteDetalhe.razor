@@ -1,0 +1,266 @@
+@page "/auditoria/incidentes/{Id}"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosIncidentes Dados
+@inject IDadosAcoesIncidentes Acoes
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Incidente · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Auditoria" Titulo="@Titulo"
+            Subtitulo="Detalhe, andamento e linha do tempo de um incidente de segurança. Toda ação é autorizada e auditada no servidor; evidências protegidas (hash/referência) não são expostas.">
+    <Acoes><a class="btn btn-secondary btn-sm" href="/auditoria/incidentes">&lsaquo; Incidentes</a></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="A gestão de incidentes exige a permissão de plataforma (seguranca.incidentes.gerir).">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando incidente…</p></div>
+}
+else if (_estado == EstadoConsultaUi.SemPermissao)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão" Mensagem="Acesso negado no servidor." /></div>
+}
+else if (_estado == EstadoConsultaUi.Erro)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou ou não foi autorizada. Nenhum detalhe interno é exibido.</p></div></div>
+}
+else if (_vm is null)
+{
+    <div class="card"><EmptyState Emoji="&#128269;" Titulo="Incidente não encontrado"
+        Mensagem="O incidente não existe ou não está entre os recentes.">
+        <Acao><a class="btn btn-primary" href="/auditoria/incidentes">Voltar à lista</a></Acao>
+    </EmptyState></div>
+}
+else
+{
+    <div class="grid grid-4 mb-4">
+        <StatCard Rotulo="Severidade" Valor="@_vm.Severidade" Icone="&#128680;" Acento="true" />
+        <StatCard Rotulo="Status" Valor="@_vm.Status" Icone="&#128203;" />
+        <StatCard Rotulo="Tipo" Valor="@_vm.Tipo" Icone="&#127991;&#65039;" />
+        <StatCard Rotulo="Código" Valor="@_vm.Codigo" Icone="&#128290;" />
+    </div>
+
+    <div class="grid grid-2 gap-4 mb-4">
+        <div class="card card-pad">
+            <div class="card-head plain"><h3 class="h-95">Identificação</h3></div>
+            <div class="stack gap-3 mt-3">
+                <div><div class="text-muted text-sm">Título</div><div class="fw-700">@_vm.Titulo</div></div>
+                <div class="row wrap gap-6">
+                    <div><div class="text-muted text-sm">Severidade</div><StatusBadge Texto="@_vm.Severidade" Situacao="@_vm.SeveridadeBadge" /></div>
+                    <div><div class="text-muted text-sm">Status</div><StatusBadge Texto="@_vm.Status" Situacao="@_vm.StatusBadge" /></div>
+                    <div><div class="text-muted text-sm">Risco ao titular</div><StatusBadge Texto="@_vm.ClassificacaoRisco" Situacao="@_vm.ClassificacaoRiscoBadge" /></div>
+                </div>
+                <div class="row wrap gap-6">
+                    <div><div class="text-muted text-sm">Responsável</div><div class="text-sm" id="responsavel-incidente">@(_acompanhamento?.Responsavel ?? _vm.ResponsavelId ?? "—")</div></div>
+                    <div><div class="text-muted text-sm">Tenant afetado</div><div class="mono text-sm">@(_vm.TenantAfetadoId is { } t ? t.ToString() : "—")</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card card-pad">
+            <div class="card-head plain"><h3 class="h-95">Ciclo de vida</h3></div>
+            <div class="stack gap-3 mt-3">
+                <div class="row wrap gap-6">
+                    <div><div class="text-muted text-sm">Detectado</div><div class="mono text-sm">@_vm.DetectadoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</div></div>
+                    <div><div class="text-muted text-sm">Atualizado</div><div class="mono text-sm">@_vm.AtualizadoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</div></div>
+                    <div><div class="text-muted text-sm">Encerrado</div><div class="mono text-sm">@(_vm.EncerradoEmUtc is { } e ? e.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) : "—")</div></div>
+                </div>
+                <div><div class="text-muted text-sm">Situação</div><div class="fw-700">@(_vm.EmAberto ? "Em tratamento" : "Encerrado")</div></div>
+            </div>
+        </div>
+    </div>
+
+    @if (_vm.EmAberto)
+    {
+        <div class="card card-pad mb-4" id="acoes-incidente">
+            <h3 class="card-title">Registrar andamento</h3>
+            <p class="text-sm text-muted mt-2 mtx-075">
+                Fluxo: <strong>Detectado → Em análise → Contido → Encerrado</strong>. A classificação de risco ao titular é
+                uma decisão humana (você fica registrado como responsável). Não cole dados pessoais, senhas ou tokens.
+            </p>
+            <div class="grid grid-2 gap-3 mt-3">
+                <div class="field"><label for="acao-incidente">Ação</label>
+                    <select id="acao-incidente" class="input" value="@((int)_acao)" @onchange="MudarAcao" disabled="@_executando">
+                        @foreach (var (acao, rotulo) in AcoesDisponiveis)
+                        {
+                            <option value="@((int)acao)">@rotulo</option>
+                        }
+                    </select></div>
+                @if (_acao == AcaoIncidenteUi.ClassificarRisco)
+                {
+                    <div class="field"><label for="classificacao-risco">Risco ao titular</label>
+                        <select id="classificacao-risco" class="input" @bind="_classificacao" disabled="@_executando">
+                            <option value="">Escolha…</option>
+                            <option value="SemRiscoRelevante">Sem risco relevante</option>
+                            <option value="ComRiscoOuDanoRelevante">Com risco ou dano relevante</option>
+                        </select></div>
+                }
+            </div>
+            @if (_acao == AcaoIncidenteUi.ClassificarRisco)
+            {
+                <label class="row gap-2 ai-center mt-2">
+                    <input id="chk-dados-pessoais" type="checkbox" checked="@_dadosPessoais" @onchange="e => _dadosPessoais = (bool)(e.Value ?? false)" disabled="@_executando" />
+                    <span class="text-sm">O incidente envolve dados pessoais</span>
+                </label>
+            }
+            <div class="field mt-3"><label for="texto-acao">@RotuloTexto</label>
+                <textarea id="texto-acao" class="input" rows="3" maxlength="2000" @bind="_texto" @bind:event="oninput" disabled="@_executando"></textarea></div>
+            <button id="btn-executar-acao" class="btn btn-primary" @onclick="ExecutarAsync" disabled="@(_executando || !PodeExecutar)">
+                @if (_executando) { <span class="spin on-dark" aria-hidden="true"></span> }
+                Registrar
+            </button>
+            @if (_resultado is { } r)
+            {
+                <div id="resultado-incidente" class="alert @(r.Sucesso ? "alert-ok" : "alert-warn") mt-3" role="@(r.Sucesso ? "status" : "alert")" aria-live="polite">
+                    <span class="a-icon" aria-hidden="true">@(r.Sucesso ? "✅" : "⚠️")</span>
+                    <div><div class="a-title">@r.Titulo</div><div class="a-body">@r.Mensagem</div></div>
+                </div>
+            }
+        </div>
+    }
+    else if (_resultado is { Sucesso: true } fim)
+    {
+        <div id="resultado-incidente" class="alert alert-ok mb-4" role="status">
+            <span class="a-icon" aria-hidden="true">✅</span>
+            <div><div class="a-title">@fim.Titulo</div><div class="a-body">@fim.Mensagem</div></div>
+        </div>
+    }
+
+    <div class="card card-pad" id="timeline-incidente">
+        <h3 class="card-title">Linha do tempo</h3>
+        @if (_acompanhamento is null || _acompanhamento.Timeline.Count == 0)
+        {
+            <p class="text-sm text-muted mt-3 mtx-075">Linha do tempo indisponível.</p>
+        }
+        else
+        {
+            <div class="dt-scroll mt-3">
+                <table class="dt">
+                    <thead><tr><th class="tnum">#</th><th>Quando (UTC)</th><th>Etapa</th><th>Por</th><th>Descrição</th></tr></thead>
+                    <tbody>
+                        @foreach (var entrada in _acompanhamento.Timeline)
+                        {
+                            <tr>
+                                <td class="tnum">@entrada.Sequencia</td>
+                                <td class="text-sm mono">@entrada.OcorridoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td class="text-sm fw-700">@entrada.Tipo</td>
+                                <td class="text-sm">@entrada.Ator</td>
+                                <td class="text-sm">@entrada.Descricao</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <p class="text-sm text-muted mt-3">A linha do tempo é imutável (só recebe novas entradas); evidências ficam preservadas por hash e referência, fora desta tela.</p>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private bool _carregando = true;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemPermissao;
+    private RegistroIncidenteVm? _vm;
+    private AcompanhamentoIncidenteVm? _acompanhamento;
+
+    // Andamento (só UX: o servidor valida a ação, o estado e o texto, e audita).
+    private AcaoIncidenteUi _acao = AcaoIncidenteUi.AdicionarNota;
+    private string _texto = string.Empty;
+    private string _classificacao = string.Empty;
+    private bool _dadosPessoais;
+    private bool _executando;
+    private ResultadoAcaoVm? _resultado;
+
+    private IEnumerable<(AcaoIncidenteUi Acao, string Rotulo)> AcoesDisponiveis
+    {
+        get
+        {
+            if (_vm is null) { yield break; }
+            if (_vm.Status == "Detectado") { yield return (AcaoIncidenteUi.IniciarAnalise, "Iniciar análise"); }
+            yield return (AcaoIncidenteUi.RegistrarContencao, "Registrar contenção");
+            yield return (AcaoIncidenteUi.ClassificarRisco, "Classificar risco ao titular");
+            yield return (AcaoIncidenteUi.AdicionarNota, "Adicionar nota");
+            if (_vm.Status != "Detectado") { yield return (AcaoIncidenteUi.Encerrar, "Encerrar incidente"); }
+        }
+    }
+
+    private string RotuloTexto => _acao switch
+    {
+        AcaoIncidenteUi.IniciarAnalise => "Nota da análise (opcional)",
+        AcaoIncidenteUi.RegistrarContencao => "Medida de contenção aplicada",
+        AcaoIncidenteUi.ClassificarRisco => "Justificativa da classificação",
+        AcaoIncidenteUi.Encerrar => "Resumo do encerramento",
+        _ => "Nota",
+    };
+
+    private bool PodeExecutar => _acao switch
+    {
+        AcaoIncidenteUi.IniciarAnalise => true,
+        AcaoIncidenteUi.ClassificarRisco => _classificacao.Length > 0 && !string.IsNullOrWhiteSpace(_texto),
+        _ => !string.IsNullOrWhiteSpace(_texto),
+    };
+
+    private void MudarAcao(ChangeEventArgs e)
+    {
+        _acao = int.TryParse(e.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) && Enum.IsDefined((AcaoIncidenteUi)v)
+            ? (AcaoIncidenteUi)v
+            : AcaoIncidenteUi.AdicionarNota;
+        _resultado = null;
+    }
+
+    private async Task ExecutarAsync()
+    {
+        if (_executando || _vm is null) { return; }
+        _executando = true;
+        try
+        {
+            _resultado = await Acoes.ExecutarAsync(_vm.Id, _acao, _texto, _dadosPessoais, _classificacao);
+            if (_resultado.Sucesso)
+            {
+                _texto = string.Empty;
+                _classificacao = string.Empty;
+                _dadosPessoais = false;
+                await RecarregarAsync(_vm.Id);
+                _acao = AcoesDisponiveis.Any(a => a.Acao == _acao) ? _acao : AcaoIncidenteUi.AdicionarNota;
+            }
+        }
+        finally { _executando = false; }
+    }
+
+    private async Task RecarregarAsync(Guid id)
+    {
+        var (item, estado) = await Dados.ObterAsync(id);
+        _vm = item;
+        _estado = estado;
+        _acompanhamento = item is null ? null : (await Acoes.ObterAcompanhamentoAsync(id, item.ResponsavelId)).Item;
+    }
+
+    private IReadOnlyList<Migalha> _migalhas => [new Migalha("Auditoria", "/auditoria/eventos"), new Migalha("Incidentes", "/auditoria/incidentes"), new Migalha(_vm?.Codigo ?? "Detalhe")];
+
+    private string Titulo => _vm is null ? "Incidente" : $"Incidente {_vm.Codigo}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _carregando = true;
+        _vm = null;
+        if (Visual.Pode(Permissoes.SegurancaIncidentesGerir) && Guid.TryParse(Id, out var id))
+        {
+            await RecarregarAsync(id);
+        }
+        else
+        {
+            _estado = EstadoConsultaUi.Erro;
+        }
+
+        _carregando = false;
+    }
+}

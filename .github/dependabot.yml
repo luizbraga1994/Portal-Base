@@ -1,0 +1,22 @@
+# Dependabot (Prompt 52, Fases 16/28/33) — mantém dependências e GitHub Actions atualizadas de forma
+# CONTROLADA (não indiscriminada): PRs individuais que passam por CI + gates de segurança antes do merge.
+# É o mecanismo sancionado para gerenciar versões de Actions (rumo a pin por SHA) e corrigir CVEs de NuGet.
+version: 2
+updates:
+  # GitHub Actions: detecta tags mutáveis / versões desatualizadas e propõe atualização (supply-chain §16).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(security)"
+
+  # NuGet (Central Package Management): atualizações de segurança de dependências .NET (§8/§28).
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"

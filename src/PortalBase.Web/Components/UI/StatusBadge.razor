@@ -1,0 +1,15 @@
+@* Status: ícone (dot) + texto + cor — nunca só cor (§74/§54). *@
+<span class="badge @ClasseBadge">
+    <span class="dot" aria-hidden="true"></span>@Texto
+</span>
+
+@code {
+    /// <summary>Texto exibido (ex.: "Fechada").</summary>
+    [Parameter] public string Texto { get; set; } = string.Empty;
+
+    /// <summary>Situação: ok | warn | bad | info | neutral | primary. Ou uma classe badge-* completa.</summary>
+    [Parameter] public string Situacao { get; set; } = "neutral";
+
+    private string ClasseBadge =>
+        Situacao.StartsWith("badge-", StringComparison.Ordinal) ? Situacao : $"badge-{Situacao}";
+}

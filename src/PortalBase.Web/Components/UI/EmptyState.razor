@@ -1,0 +1,20 @@
+@* Empty state profissional (§48): sempre com próxima ação recomendada. *@
+<div class="state">
+    <div class="st-emoji" aria-hidden="true">@(System.Net.WebUtility.HtmlDecode(Emoji))</div>
+    <h3>@Titulo</h3>
+    @if (!string.IsNullOrEmpty(Mensagem))
+    {
+        <p>@Mensagem</p>
+    }
+    @if (Acao is not null)
+    {
+        <div class="st-cta">@Acao</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Emoji { get; set; } = "📭"; // caixa vazia
+    [Parameter] public string Titulo { get; set; } = "Nada por aqui";
+    [Parameter] public string? Mensagem { get; set; }
+    [Parameter] public RenderFragment? Acao { get; set; }
+}

@@ -1,0 +1,183 @@
+@* Topbar: marca + contexto (tenant/contribuinte) + ambiente + tema + usuário (§6/§10/§11).
+   O layout é renderizado no SERVIDOR (estático): os botões de menu e de tema são só apresentação e são tratados por
+   wwwroot/js/portalbase.js (atributo data-ui), não por @onclick — que aqui nunca chegaria ao servidor. *@
+@using PortalBase.Web.Seguranca
+@using PortalBase.Application.Marca
+@inject IContextoApresentacao Contexto
+@inject IAutorizacaoVisual Visual
+@inject ServicoMarcaTenant MarcaTenant
+@inject ServicoMarcaPlataforma MarcaPlataforma
+
+<header class="topbar">
+    <button type="button" class="icon-btn menu-toggle" title="Menu" aria-label="Abrir menu" aria-controls="nav-principal"
+            aria-expanded="false" data-ui="alternar-nav"><IconeLinha Nome="menu" Tamanho="18" /></button>
+
+    <div class="brand-mark">
+        @if (_logoUrl is not null)
+        {
+            <img class="brand-logo-img" src="@_logoUrl" alt="Logo" />
+        }
+        else
+        {
+            <div class="brand-logo" aria-hidden="true">D</div>
+        }
+        <div>
+            <div class="brand-name">Portal Base</div>
+            <div class="brand-sub">Andersen Consulting</div>
+        </div>
+        <button type="button" class="icon-btn ml-8" title="Recolher menu" aria-label="Recolher menu" aria-controls="nav-principal"
+                aria-pressed="false" data-ui="recolher-nav"><IconeLinha Nome="recolher" Tamanho="18" /></button>
+    </div>
+
+    <div class="ctx-bar">
+        @if (Visual.Demonstracao)
+        {
+            @if (!string.IsNullOrEmpty(Contexto.Tenant))
+            {
+                <span class="ctx-chip always"><span class="ctx-dot" aria-hidden="true"></span><span class="k">Contribuinte</span><span class="v">@Contexto.Contribuinte</span></span>
+            }
+        }
+        else
+        {
+            <AuthorizeView>
+                <Authorized>
+                    @{ var contribuinte = context.User.FindFirst(ClaimsPortalBase.TenantNome)?.Value; }
+                    @if (!string.IsNullOrEmpty(contribuinte))
+                    {
+                        <span class="ctx-chip always"><span class="ctx-dot" aria-hidden="true"></span><span class="k">Contribuinte</span><span class="v">@contribuinte</span></span>
+                        <a class="ctx-chip ctx-chip--link" href="/conta/selecionar" title="Trocar de contribuinte">Trocar</a>
+                    }
+                    else
+                    {
+                        @* Telas de plataforma abertas sem contribuinte (ex.: cadastrar o primeiro). *@
+                        <a class="ctx-chip ctx-chip--link" id="link-escolher-contribuinte" href="/conta/selecionar">Escolher contribuinte</a>
+                    }
+                </Authorized>
+            </AuthorizeView>
+        }
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="tb-actions">
+        @if (Visual.Demonstracao)
+        {
+            <label class="ctx-chip" title="Perfil de demonstração (só afeta o que aparece)">
+                <span class="k">Perfil</span>
+                <select class="v btn-plain"
+                        value="@Visual.Perfil" @onchange="TrocarPerfil" aria-label="Perfil de demonstração">
+                    @foreach (var p in PerfisDemonstracao.Nomes)
+                    {
+                        <option value="@p">@p</option>
+                    }
+                </select>
+            </label>
+        }
+
+        <EnvironmentBadge />
+
+        @* O ícone acompanha o tema EFETIVO pelo CSS (inclusive o do sistema): sol no escuro, lua no claro. *@
+        <button type="button" class="icon-btn" title="Alternar tema" aria-label="Alternar tema claro/escuro" data-ui="alternar-tema">
+            <span class="tema-icone tema-icone--escuro" aria-hidden="true"><IconeLinha Nome="sol" Tamanho="17" /></span>
+            <span class="tema-icone tema-icone--claro" aria-hidden="true"><IconeLinha Nome="lua" Tamanho="17" /></span>
+        </button>
+
+        @if (Visual.Demonstracao)
+        {
+            <div class="user-btn" title="Usuário de demonstração">
+                <span class="user-avatar" aria-hidden="true">AD</span>
+                <span>Analista Demo</span>
+            </div>
+        }
+        else
+        {
+            <AuthorizeView>
+                <Authorized>
+                    @* Menu do usuário: abre/fecha em wwwroot/js/portalbase.js (data-ui). "Sair" encerra a sessão direto
+                       (POST com antiforgery para o mesmo /conta/logout da tela de confirmação). *@
+                    @{ var nome = context.User.Identity?.Name ?? "Usuário"; }
+                    <div class="user-menu">
+                        <button type="button" class="user-btn" id="btn-menu-usuario" title="Conta: alterar senha ou sair"
+                                aria-expanded="false" aria-controls="menu-usuario" data-ui="alternar-menu-usuario">
+                            <span class="user-avatar" aria-hidden="true">@Iniciais(nome)</span>
+                            <span>@nome</span>
+                            <IconeLinha Nome="seta-baixo" Tamanho="14" Traco="2" Classe="user-caret" />
+                        </button>
+                        <div class="user-dropdown" id="menu-usuario" hidden>
+                            <div class="user-dropdown__quem">Conectado como <strong>@nome</strong></div>
+                            <a class="user-dropdown__item" id="menu-usuario-senha" href="/conta/minha-conta#alterar-senha">
+                                <IconeLinha Nome="chave" /> Alterar senha
+                            </a>
+                            <form method="post" action="/conta/logout" class="m-0">
+                                <AntiforgeryToken />
+                                <button type="submit" class="user-dropdown__item user-dropdown__item--sair" id="menu-usuario-sair">
+                                    <IconeLinha Nome="sair" /> Sair
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </Authorized>
+                <NotAuthorized>
+                    <a class="btn btn-secondary btn-sm" href="/conta/entrar">Entrar</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        }
+    </div>
+</header>
+
+@code {
+    private string? _logoUrl;
+
+    [Parameter] public EventCallback<string> OnPerfilAlterado { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Logo exibida na topbar: a do CONTRIBUINTE ativo tem prioridade; senão a GLOBAL; senão a marca "D".
+        // Fail-safe: qualquer indisponibilidade cai no fallback "D" (nunca quebra o shell).
+        if (Visual.Demonstracao)
+        {
+            return;
+        }
+
+        try
+        {
+            // UI-005: só os metadados (cache curto), nunca a imagem — antes lia até 10 MB do banco por navegação.
+            if (await MarcaTenant.ObterResumoAsync() is not null)
+            {
+                _logoUrl = "/branding/logo/contribuinte";
+            }
+            else if (await MarcaPlataforma.ObterResumoAsync() is not null)
+            {
+                _logoUrl = "/branding/logo";
+            }
+        }
+        catch
+        {
+            _logoUrl = null;
+        }
+    }
+
+    private async Task TrocarPerfil(ChangeEventArgs e)
+    {
+        var perfil = e.Value?.ToString() ?? "Completo";
+        await OnPerfilAlterado.InvokeAsync(perfil);
+    }
+
+    private static readonly char[] Separadores = [' ', '.', '@'];
+
+    private static string Iniciais(string? nome)
+    {
+        if (string.IsNullOrWhiteSpace(nome))
+        {
+            return "U";
+        }
+
+        var partes = nome.Split(Separadores, StringSplitOptions.RemoveEmptyEntries);
+        return partes.Length switch
+        {
+            0 => "U",
+            1 => partes[0][..1].ToUpperInvariant(),
+            _ => (partes[0][..1] + partes[1][..1]).ToUpperInvariant(),
+        };
+    }
+}

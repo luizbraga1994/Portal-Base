@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# Imagem do host Worker (Generic Host). Multi-stage, runtime mínima (sem ASP.NET),
+# usuário não-root, sem segredos embarcados.
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+COPY global.json Directory.Build.props Directory.Packages.props BannedSymbols.txt .editorconfig ./
+COPY src/PortalBase.Domain/PortalBase.Domain.csproj src/PortalBase.Domain/
+COPY src/PortalBase.Shared/PortalBase.Shared.csproj src/PortalBase.Shared/
+COPY src/PortalBase.Application/PortalBase.Application.csproj src/PortalBase.Application/
+COPY src/PortalBase.Infrastructure/PortalBase.Infrastructure.csproj src/PortalBase.Infrastructure/
+COPY src/PortalBase.Worker/PortalBase.Worker.csproj src/PortalBase.Worker/
+RUN dotnet restore src/PortalBase.Worker/PortalBase.Worker.csproj
+
+COPY . .
+RUN dotnet publish src/PortalBase.Worker/PortalBase.Worker.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+
+# Reprodutibilidade da imagem (Prompt 53, Fase 7): versão/commit/timestamp por --build-arg; rótulos OCI
+# + variáveis PORTALBASE_BUILD_* reportadas no startup. Nenhum segredo. Health do Worker é via heartbeat/
+# observabilidade (P31/P51), não HTTP — por isso não há HEALTHCHECK de container aqui.
+ARG BUILD_VERSION=2.0.0
+ARG BUILD_SHA=desconhecido
+ARG BUILD_TIMESTAMP=desconhecido
+LABEL org.opencontainers.image.title="Portal Base Worker" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.revision="${BUILD_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIMESTAMP}" \
+      org.opencontainers.image.source="https://github.com/luizbraga1994/Portal-Base"
+ENV PORTALBASE_BUILD_VERSION=${BUILD_VERSION} \
+    PORTALBASE_BUILD_SHA=${BUILD_SHA} \
+    PORTALBASE_BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
+
+# Usuário não-root já definido na imagem base (.NET 8+).
+USER $APP_UID
+
+ENTRYPOINT ["dotnet", "PortalBase.Worker.dll"]

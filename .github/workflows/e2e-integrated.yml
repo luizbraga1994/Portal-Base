@@ -1,0 +1,100 @@
+name: E2E Integrated
+
+# Prompt 55/76 — E2E INTEGRADO (Browser → Web → MySQL → Worker real → MySQL → read-model → UI).
+# O pipeline provê o MySQL como serviço; a Web (Kestrel) e o Worker (TrabalhadorHeartbeat) sobem no próprio
+# processo de teste, apontando para esse MySQL. Sem MySQL, os cenários integrados são BLOCKED (skip) — nunca
+# PASS fictício. Os fluxos autenticados (login + MFA reais, RBAC, isolamento entre contribuintes, auditoria,
+# upload, backup/restauração) rodam dentro do mesmo `dotnet test` abaixo.
+
+# Economia de minutos: suíte pesada só no PR para o master (e manualmente) — não roda a cada push de branch.
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+
+jobs:
+  e2e-integrated:
+    runs-on: ubuntu-latest
+
+    # INFRA: MySQL 8.4 real como serviço (DB). A conexão administrativa é injetada via
+    # PORTALBASE_TEST_MYSQL_ADMIN — o harness cria catálogo/tenant descartáveis e limpa ao final.
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: e2e_root_pwd
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root --password=e2e_root_pwd"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      # Conexão ADMIN do teste (CREATE DATABASE/USER/GRANT). Senha efêmera do serviço acima — não é
+      # segredo de produção; nunca é publicada em artifact (Fase 39).
+      # SslMode=Disabled: valor do provider Oracle MySql.Data (não há 'None' no enum MySqlSslMode — 'None'
+      # lançava ArgumentException, que o harness integrado capturava ⇒ os fluxos integrados SKIPavam em silêncio).
+      PORTALBASE_TEST_MYSQL_ADMIN: 'Server=127.0.0.1;Port=3306;Uid=root;Pwd=e2e_root_pwd;SslMode=Disabled;AllowPublicKeyRetrieval=true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj
+
+      - name: Build (warnings como erro)
+        run: dotnet build tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj -c Release -warnaserror --no-restore
+
+      - name: Instalar navegador (Chromium)
+        run: pwsh tests/PortalBase.BrowserE2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Aguardar MySQL saudável
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root --password=e2e_root_pwd --silent; then
+              echo "MySQL pronto."; exit 0
+            fi
+            echo "Aguardando MySQL ($i)…"; sleep 2
+          done
+          echo "::error::MySQL não ficou saudável a tempo."; exit 1
+
+      # E2E INTEGRADO: START WEB (Kestrel) + START WORKER (TrabalhadorHeartbeat) acontecem no harness,
+      # contra o MySQL real do serviço. Executa a suíte de navegador inteira (integrados inclusos).
+      - name: E2E integrado (Playwright + MySQL + Worker real)
+        run: >
+          dotnet test tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj
+          -c Release --no-build --verbosity normal
+          --logger "trx;LogFileName=e2e-integrated.trx"
+          --results-directory artifacts/test-results
+
+      # ARTIFACTS: sempre publica TRX + evidências (traces/screenshots). Nunca segredos/cookies/conn
+      # strings (traces sem sources; nenhuma página com segredo). CLEANUP do DB é do próprio harness.
+      - name: Publicar resultados e evidências
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-integrated-evidencias
+          path: |
+            artifacts/test-results/**
+            artifacts/e2e/**
+          if-no-files-found: ignore
+          retention-days: 7

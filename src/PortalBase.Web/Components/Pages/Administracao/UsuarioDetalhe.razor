@@ -1,0 +1,472 @@
+@page "/admin/usuarios/{Id:guid}"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Identidade
+@inject IDadosUsuariosAdmin Dados
+@inject IDadosAcoesUsuario Acoes
+@inject IDadosGestaoUsuarios Gestao
+@inject IDadosPerfis Perfis
+@inject IAutorizacaoVisual Visual
+@inject IContextoSeguranca Seguranca
+@inject ServicoNotificacoes Notificacoes
+@inject NavigationManager Navegacao
+
+<PageTitle>Usuário · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="@Titulo"
+            Subtitulo="Cadastro do usuário neste contribuinte: dados, situação, perfis e acesso. Cada alteração é conferida e auditada no servidor — nunca mostra senha ou segredo de MFA.">
+    <Acoes>
+        <a class="btn btn-secondary btn-sm" href="/admin/usuarios">&lsaquo; Usuários</a>
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Ver o usuário exige a permissão admin.usuarios. A decisão é do servidor." /></div>
+}
+else if (_carregando)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando usuário…</p></div></div>
+}
+else if (_estado == EstadoConsultaUi.SemTenant)
+{
+    <div class="card"><EmptyState Emoji="&#127970;" Titulo="Selecione um contribuinte"
+        Mensagem="O usuário é consultado no contexto de um contribuinte autorizado." /></div>
+}
+else if (_estado == EstadoConsultaUi.SemPermissao)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão" Mensagem="Acesso negado no servidor." /></div>
+}
+else if (_estado == EstadoConsultaUi.Erro)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji" aria-hidden="true">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou. Nenhum detalhe interno é exibido.</p></div></div>
+}
+else if (_vm is null)
+{
+    <div class="card"><EmptyState Emoji="&#128269;" Titulo="Usuário não encontrado"
+        Mensagem="O usuário não existe ou não está vinculado a este contribuinte." >
+        <Acao><a class="btn btn-primary" href="/admin/usuarios">Voltar à lista</a></Acao></EmptyState></div>
+}
+else
+{
+    <div class="grid grid-4 mb-4">
+        <StatCard Rotulo="Situação" Valor="@_vm.StatusRotulo" Icone="&#128100;" Acento="@(_vm.StatusBadge == "bad")" />
+        <StatCard Rotulo="Acesso ao contribuinte" Valor="@_vm.AcessoRotulo" Icone="&#128273;" Acento="@(_vm.AcessoBadge == "bad")" />
+        <StatCard Rotulo="MFA" Valor="@(_vm.MfaHabilitado ? "Habilitado" : "Não habilitado")" Icone="&#128274;" />
+        <StatCard Rotulo="Administrador da plataforma" Valor="@(_vm.AdministradorPlataforma ? "Sim" : "Não")" Icone="&#128081;" Acento="@_vm.AdministradorPlataforma" />
+    </div>
+
+    @if (_ehVoceMesmo)
+    {
+        <div class="alert alert-info mb-4" role="note">
+            <span class="a-icon" aria-hidden="true">&#8505;&#65039;</span>
+            <div class="a-body">Este é o <strong>seu</strong> usuário. Você pode corrigir nome e e-mail; perfis, situação, exclusão e o perfil
+                de Administrador da plataforma só podem ser alterados por <strong>outro</strong> administrador (separação de deveres).</div>
+        </div>
+    }
+
+    <div class="card card-pad mb-4" id="dados-usuario">
+        <div class="row gap-3 ai-center jc-between">
+            <h3 class="card-title">Dados do usuário</h3>
+            <span class="text-sm text-muted">Usuário: <span class="mono">@_vm.Login</span> · criado em @_vm.CriadoEmUtc.ToString("dd/MM/yyyy", _ci)</span>
+        </div>
+        <div class="grid grid-2 gap-4 mt-4">
+            <div class="field">
+                <label for="editar-nome">Nome</label>
+                <input class="input" id="editar-nome" maxlength="200" @bind="_nome" @bind:event="oninput" disabled="@(!PodeEditarConta)" />
+            </div>
+            <div class="field">
+                <label for="editar-email">E-mail (é o login)</label>
+                <input class="input" id="editar-email" type="email" maxlength="256" @bind="_email" @bind:event="oninput" disabled="@(!PodeEditarConta)" />
+                <div class="help">Trocar o e-mail encerra as sessões abertas do usuário; ele passa a entrar com o novo.</div>
+            </div>
+        </div>
+        @if (!PodeEditarConta)
+        {
+            <p class="text-sm text-muted">
+                Este usuário também tem acesso a outros contribuintes@(_vm.AdministradorPlataforma ? " (ou é Administrador da plataforma)" : string.Empty).
+                Os dados da conta dele só podem ser alterados por um Administrador da plataforma.
+            </p>
+        }
+        <button class="btn btn-primary" id="btn-salvar-dados" @onclick="SalvarDados" disabled="@(_executando || !PodeEditarConta)">Salvar dados</button>
+    </div>
+
+    <div class="card card-pad mb-4" id="perfis-usuario">
+        <h3 class="card-title">Perfis neste contribuinte</h3>
+        <p class="text-sm text-muted mt-2">O que o usuário pode fazer aqui. Marque um ou mais perfis e salve. Para criar ou ajustar perfis, vá em <a href="/admin/perfis">Perfis</a>.</p>
+        @if (_vm.AcessoBadge != "ok")
+        {
+            <p class="text-sm"><strong>O acesso deste usuário ao contribuinte está revogado.</strong> Escolha os perfis e clique em "Devolver acesso".</p>
+        }
+        <SeletorPerfis Perfis="_perfis" Selecionados="_perfisSelecionados" Prefixo="editar" Desabilitado="@(_ehVoceMesmo || _executando)">
+            <Adicional>
+                @* Perfil GLOBAL (não é deste contribuinte): sempre listado; concedido/removido na hora, com confirmação, só por
+                   OUTRO Administrador da plataforma — a decisão é do servidor (plataforma.administradores.gerir). *@
+                <div class="perfil-opcao perfil-opcao--plataforma" id="perfil-plataforma" data-concedido="@(_vm.AdministradorPlataforma ? "sim" : "nao")">
+                    <span class="perfil-opcao__icone" aria-hidden="true">&#128081;</span>
+                    <span>
+                        <span class="fw-700">Administrador da plataforma</span>
+                        <span class="badge badge-bad ml-1">global</span>
+                        <span class="perfil-opcao__desc">Acesso total: todas as permissões em todos os contribuintes e na plataforma, sem pedir MFA.</span>
+                        <span class="perfil-opcao__estado">@(_vm.AdministradorPlataforma ? "✔ Concedido" : "Não concedido")</span>
+                        @if (PodeAlterarPlataforma)
+                        {
+                            @if (_vm.AdministradorPlataforma)
+                            {
+                                <button class="btn btn-danger btn-sm mt-2" id="btn-remover-plataforma" @onclick="() => _confirmar = Confirmacao.RemoverPlataforma" disabled="@_executando">Remover</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-secondary btn-sm mt-2" id="btn-conceder-plataforma" @onclick="() => _confirmar = Confirmacao.ConcederPlataforma" disabled="@(_executando || _vm.StatusBadge != "ok")">Conceder</button>
+                            }
+                        }
+                        else
+                        {
+                            <span class="perfil-opcao__desc mt-2" id="motivo-plataforma">@MotivoPlataforma</span>
+                        }
+                    </span>
+                </div>
+            </Adicional>
+        </SeletorPerfis>
+        <div class="row gap-3 mt-3">
+            @if (_vm.AcessoBadge == "ok")
+            {
+                <button class="btn btn-primary" id="btn-salvar-perfis" @onclick="SalvarPerfis" disabled="@(_executando || _ehVoceMesmo)">Salvar perfis</button>
+            }
+            else
+            {
+                <button class="btn btn-primary" id="btn-devolver-acesso" @onclick="DevolverAcesso" disabled="@(_executando || _ehVoceMesmo)">Devolver acesso</button>
+            }
+        </div>
+    </div>
+
+    <div class="card card-pad mb-4" id="contribuintes-usuario">
+        <h3 class="card-title">Contribuintes</h3>
+        @if (_vm.AdministradorPlataforma)
+        {
+            <p class="text-sm text-muted mt-2 mb-0">Este usuário é <strong>Administrador da plataforma</strong>: já acessa todos os contribuintes.</p>
+        }
+        else if (_ehVoceMesmo)
+        {
+            <p class="text-sm text-muted mt-2 mb-0">É o seu usuário: os contribuintes dele só podem ser alterados por <strong>outro</strong> administrador.</p>
+        }
+        else if (_estadoContribuintes != EstadoConsultaUi.Ok)
+        {
+            <p class="text-sm text-muted mt-2 mb-0">Não foi possível carregar os contribuintes agora. Nenhum detalhe interno é exibido.</p>
+        }
+        else if (!_contribuintes.Any(c => !c.Atual))
+        {
+            <p class="text-sm text-muted mt-2 mb-0">Você administra só este contribuinte. O acesso a outros é dado por quem os administra (ou pelo Administrador da plataforma).</p>
+        }
+        else
+        {
+            <p class="text-sm text-muted mt-2">
+                A <strong>mesma conta</strong> (e-mail, senha e MFA) vale em todos os contribuintes dela. Marque os contribuintes que o
+                usuário acessa: os perfis escolhidos abaixo valem em <strong>todos os marcados</strong>. Desmarcar <strong>revoga</strong> o
+                acesso (dá para devolver depois). Aparecem só os contribuintes que você administra; este contribuinte usa os perfis do quadro acima.
+            </p>
+            <ListaContribuintes Itens="_contribuintes" Marcados="_contribuintesMarcados" Prefixo="usuario" Id="tabela-contribuintes"
+                                MostrarSituacao="true" Desabilitado="_executando" />
+            <h4 class="h-95 mt-4">Perfis nos contribuintes marcados</h4>
+            <p class="text-sm text-muted mt-1">Só os perfis do sistema: um perfil personalizado vale em um contribuinte só.</p>
+            <SeletorPerfis Perfis="PerfisDoSistema" Selecionados="_perfisContribuintes" Prefixo="contribuintes" Desabilitado="_executando" />
+            <div class="row gap-3 mt-3">
+                <button class="btn btn-primary" id="btn-salvar-contribuintes" @onclick="SalvarContribuintes" disabled="@_executando">Salvar contribuintes</button>
+            </div>
+        }
+    </div>
+
+    <div class="card card-pad mb-4" id="mfa-usuario">
+        <h3 class="card-title">Verificação em duas etapas (MFA)</h3>
+        <p class="text-sm mt-2 mb-0">
+            Situação: <strong>@(_vm.MfaHabilitado ? "cadastrada" : "não cadastrada")</strong>
+            · @(_vm.MfaObrigatorio ? "exigida (o usuário não entra sem ela)" : "opcional (o usuário pode cadastrar em Minha conta)")
+            @if (_vm.SenhaTemporaria)
+            {
+                <span> · <span class="badge badge-warn">senha temporária</span> (o usuário troca no próximo acesso)</span>
+            }
+        </p>
+        <div class="row wrap gap-3 mt-3">
+            @if (_vm.MfaObrigatorio)
+            {
+                <button class="btn btn-secondary" id="btn-exigir-mfa" @onclick="() => Executar(() => Gestao.DefinirMfaObrigatorioAsync(_vm.UsuarioId, obrigatorio: false))"
+                        disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Deixar de exigir MFA</button>
+            }
+            else
+            {
+                <button class="btn btn-secondary" id="btn-exigir-mfa" @onclick="() => Executar(() => Gestao.DefinirMfaObrigatorioAsync(_vm.UsuarioId, obrigatorio: true))"
+                        disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Exigir MFA</button>
+            }
+            @if (_vm.MfaHabilitado)
+            {
+                <button class="btn btn-danger" id="btn-remover-mfa" @onclick="() => _confirmar = Confirmacao.RemoverMfa"
+                        disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Remover MFA</button>
+            }
+        </div>
+        <p class="text-sm text-muted mt-3 mb-0">
+            <strong>Exigir MFA</strong>: no próximo acesso o usuário cadastra o aplicativo autenticador lendo um QR code, antes de usar o
+            portal. <strong>Remover MFA</strong> serve para quem perdeu o celular: apaga o cadastro e os códigos de recuperação e encerra as
+            sessões dele (pede a sua verificação em duas etapas).
+        </p>
+    </div>
+
+    <div class="card card-pad mb-4" id="situacao-usuario">
+        <h3 class="card-title">Situação, senha e acesso</h3>
+        <div class="row wrap gap-3 mt-3">
+            @if (_vm.StatusBadge == "ok")
+            {
+                <button class="btn btn-secondary" id="btn-inativar" @onclick="() => _confirmar = Confirmacao.Inativar" disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Inativar usuário</button>
+            }
+            else
+            {
+                <button class="btn btn-secondary" id="btn-ativar" @onclick="() => Executar(() => Gestao.DefinirSituacaoAsync(_vm.UsuarioId, ativo: true))" disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Ativar usuário</button>
+            }
+            @if (_vm.Bloqueado)
+            {
+                <button class="btn btn-secondary" id="btn-desbloquear" @onclick="() => Executar(() => Gestao.DesbloquearAsync(_vm.UsuarioId))" disabled="@(_executando || _ehVoceMesmo || !PodeEditarConta)">Liberar bloqueio</button>
+            }
+            <button class="btn btn-secondary" id="btn-link-senha" @onclick="() => Executar(() => Gestao.EnviarLinkSenhaAsync(_vm.UsuarioId))"
+                    disabled="@(_executando || _ehVoceMesmo || !Gestao.EnvioDeLinkDisponivel)"
+                    title="@(Gestao.EnvioDeLinkDisponivel ? "Envia ao e-mail do usuário um link para ele criar uma nova senha" : "O envio de e-mail não está configurado")">
+                @(_vm.PossuiSenha ? "Enviar link para nova senha" : "Enviar link para criar a senha")
+            </button>
+            <button class="btn btn-secondary" id="btn-senha-temporaria" @onclick="() => _confirmar = Confirmacao.SenhaTemporaria"
+                    disabled="@(_executando || _ehVoceMesmo || !Gestao.EnvioDeLinkDisponivel || !PodeEditarConta)"
+                    title="@(Gestao.EnvioDeLinkDisponivel ? "Gera uma senha aleatória e envia ao e-mail do usuário; ele troca no próximo acesso" : "O envio de e-mail não está configurado")">
+                Gerar senha temporária
+            </button>
+            <div class="spacer"></div>
+            @if (_vm.AcessoBadge == "ok")
+            {
+                <button class="btn btn-ghost" id="btn-revogar" @onclick="() => _confirmar = Confirmacao.Revogar" disabled="@(_executando || _ehVoceMesmo)">Revogar acesso</button>
+            }
+            <button class="btn btn-danger" id="btn-excluir" @onclick="() => _confirmar = Confirmacao.Excluir" disabled="@(_executando || _ehVoceMesmo)">Excluir do contribuinte</button>
+        </div>
+        <p class="text-sm text-muted mt-3 mb-0">
+            <strong>Revogar</strong> tira o acesso mas mantém o cadastro (dá para devolver depois). <strong>Excluir</strong> remove o usuário
+            deste contribuinte; se ele não tiver acesso a nenhum outro, a conta também é inativada (nunca apagada: a auditoria aponta para ela).
+        </p>
+    </div>
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.Revogar)" Perigoso="true" Processando="_executando"
+                     Titulo="Revogar acesso do usuário?"
+                     Mensagem="@($"O usuário '{_vm.Login}' perderá o acesso a este contribuinte e suas sessões serão invalidadas. A operação é auditada.")"
+                     TextoConfirmar="Revogar acesso"
+                     OnConfirmar="Revogar" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.Excluir)" Perigoso="true" Processando="_executando"
+                     Titulo="Excluir o usuário deste contribuinte?"
+                     Mensagem="@($"'{_vm.Login}' deixa de ter acesso a este contribuinte e os perfis dele aqui são apagados. Se ele não tiver outro contribuinte, a conta é inativada. A operação é auditada.")"
+                     TextoConfirmar="Excluir"
+                     OnConfirmar="Excluir" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.Inativar)" Perigoso="true" Processando="_executando"
+                     Titulo="Inativar o usuário?"
+                     Mensagem="@($"'{_vm.Login}' não conseguirá mais entrar e as sessões abertas serão encerradas. Dá para ativar de novo depois.")"
+                     TextoConfirmar="Inativar"
+                     OnConfirmar="() => Executar(() => Gestao.DefinirSituacaoAsync(_vm.UsuarioId, ativo: false))" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.ConcederPlataforma)" Perigoso="true" Processando="_executando"
+                     Titulo="Tornar Administrador da plataforma?"
+                     Mensagem="@($"'{_vm.Login}' terá acesso TOTAL a todos os contribuintes e à plataforma, sem MFA. A sessão atual dele será encerrada; vale a partir do próximo login.")"
+                     TextoConfirmar="Conceder"
+                     OnConfirmar="() => Executar(() => Gestao.DefinirAdministradorPlataformaAsync(_vm.UsuarioId, administrador: true))" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.RemoverMfa)" Perigoso="true" Processando="_executando"
+                     Titulo="Remover a verificação em duas etapas?"
+                     Mensagem="@($"O cadastro do autenticador e os códigos de recuperação de '{_vm.Login}' serão apagados e as sessões dele encerradas. {(_vm.MfaObrigatorio ? "Como o MFA é exigido, ele cadastra outro no próximo acesso." : "Ele passa a entrar só com a senha até cadastrar de novo.")} Pede a sua verificação em duas etapas.")"
+                     TextoConfirmar="Remover MFA"
+                     OnConfirmar="() => Executar(() => Gestao.RemoverMfaAsync(_vm.UsuarioId))" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.SenhaTemporaria)" Perigoso="true" Processando="_executando"
+                     Titulo="Gerar uma senha temporária?"
+                     Mensagem="@($"Uma senha aleatória será enviada para {_vm.Email}. A senha atual de '{_vm.Login}' deixa de valer, as sessões dele são encerradas e, no próximo acesso, ele cria a senha definitiva.")"
+                     TextoConfirmar="Gerar e enviar"
+                     OnConfirmar="() => Executar(() => Gestao.GerarSenhaTemporariaAsync(_vm.UsuarioId))" OnCancelar="Fechar" />
+
+    <ConfirmacaoAcao Visivel="@(_confirmar == Confirmacao.RemoverPlataforma)" Perigoso="true" Processando="_executando"
+                     Titulo="Remover o perfil de Administrador da plataforma?"
+                     Mensagem="@($"'{_vm.Login}' volta a ter só os perfis de cada contribuinte. As sessões dele serão encerradas.")"
+                     TextoConfirmar="Remover"
+                     OnConfirmar="() => Executar(() => Gestao.DefinirAdministradorPlataformaAsync(_vm.UsuarioId, administrador: false))" OnCancelar="Fechar" />
+}
+
+@code {
+    private enum Confirmacao
+    {
+        Nenhuma,
+        Revogar,
+        Excluir,
+        Inativar,
+        ConcederPlataforma,
+        RemoverPlataforma,
+        RemoverMfa,
+        SenhaTemporaria,
+    }
+
+    [Parameter] public Guid Id { get; set; }
+
+    private static readonly CultureInfo _ci = CultureInfo.InvariantCulture;
+
+    private bool _carregando = true;
+    private bool _executando;
+    private Confirmacao _confirmar;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemTenant;
+    private UsuarioAdminItemVm? _vm;
+    private IReadOnlyList<PerfilGestao> _perfis = [];
+    private readonly HashSet<Guid> _perfisSelecionados = [];
+    private string _nome = string.Empty;
+    private string _email = string.Empty;
+    private bool _ehVoceMesmo;
+    private IReadOnlyList<ContribuinteDoUsuario> _contribuintes = [];
+    private EstadoConsultaUi _estadoContribuintes = EstadoConsultaUi.SemTenant;
+    private readonly HashSet<Guid> _contribuintesMarcados = [];
+    private readonly HashSet<Guid> _perfisContribuintes = [];
+
+    private IReadOnlyList<PerfilGestao> PerfisDoSistema => [.. _perfis.Where(p => p.DoSistema)];
+
+    private IReadOnlyList<Migalha> _migalhas => [new Migalha("Administração", "/admin"), new Migalha("Usuários", "/admin/usuarios"), new Migalha(_vm?.Login ?? "Detalhe")];
+
+    private string Titulo => _vm is null ? "Usuário" : $"Usuário {_vm.Login}";
+
+    // Mesma regra do servidor (que decide): a própria conta, ou conta exclusiva deste contribuinte, ou quem altera é
+    // Administrador da plataforma. Aqui só habilita/desabilita os campos.
+    private bool PodeEditarConta => _vm is not null
+        && (_ehVoceMesmo || Visual.Pode(Permissoes.PlataformaAdministradoresGerir) || (!_vm.TemOutrosContribuintes && !_vm.AdministradorPlataforma));
+
+    private bool PodeAlterarPlataforma => _vm is not null && !_ehVoceMesmo && Visual.Pode(Permissoes.PlataformaAdministradoresGerir);
+
+    private string MotivoPlataforma => _vm switch
+    {
+        null => string.Empty,
+        { AdministradorPlataforma: true } when _ehVoceMesmo =>
+            "É o seu usuário: só outro Administrador da plataforma pode remover este perfil.",
+        _ when _ehVoceMesmo =>
+            "Você ainda não é Administrador da plataforma. O primeiro é concedido fora desta tela: no ambiente local, rode de novo "
+            + "o criar-acesso-local.ps1 e entre outra vez; na implantação, pela configuração AutorizacaoPlataforma:AdministradoresPlataforma.",
+        _ => "Só um Administrador da plataforma concede ou remove este perfil (nunca a si mesmo).",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _carregando = true;
+        _vm = null;
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            await Recarregar();
+        }
+        else
+        {
+            _estado = EstadoConsultaUi.SemPermissao;
+        }
+
+        _carregando = false;
+    }
+
+    private async Task Recarregar()
+    {
+        var (item, estado) = await Dados.ObterAsync(Id);
+        _vm = item;
+        _estado = estado;
+        _ehVoceMesmo = string.Equals(Seguranca.PrincipalId, Id.ToString(), StringComparison.OrdinalIgnoreCase);
+        if (_vm is not null)
+        {
+            _nome = _vm.Nome;
+            _email = _vm.Email;
+            _perfisSelecionados.Clear();
+            foreach (var perfil in _vm.PerfilIds ?? [])
+            {
+                _perfisSelecionados.Add(perfil);
+            }
+
+            (_perfis, _) = await Perfis.ListarAsync();
+            await CarregarContribuintes();
+        }
+    }
+
+    // Seção "Contribuintes": marcados = onde o usuário tem acesso ativo; perfis = os do sistema que ele tem aqui.
+    private async Task CarregarContribuintes()
+    {
+        _contribuintesMarcados.Clear();
+        _perfisContribuintes.Clear();
+        if (_ehVoceMesmo || _vm is null || _vm.AdministradorPlataforma)
+        {
+            _contribuintes = [];
+            _estadoContribuintes = EstadoConsultaUi.Ok;
+            return;
+        }
+
+        (_contribuintes, _estadoContribuintes) = await Gestao.ListarContribuintesDoUsuarioAsync(Id);
+        foreach (var c in _contribuintes.Where(c => !c.Atual && c.Situacao == SituacaoNoContribuinte.Ativo))
+        {
+            _contribuintesMarcados.Add(c.TenantId);
+        }
+
+        var doSistema = PerfisDoSistema.Select(p => p.Id).ToHashSet();
+        foreach (var perfil in _perfisSelecionados.Where(doSistema.Contains))
+        {
+            _perfisContribuintes.Add(perfil);
+        }
+    }
+
+    private Task SalvarContribuintes()
+        => Executar(() => Gestao.SalvarContribuintesAsync(Id, [.. _contribuintesMarcados], [.. _perfisContribuintes]));
+
+    private void Fechar() => _confirmar = Confirmacao.Nenhuma;
+
+    private Task SalvarDados() => Executar(() => Gestao.AlterarDadosAsync(Id, _nome, _email));
+
+    private Task SalvarPerfis() => Executar(() => Gestao.DefinirPerfisAsync(Id, [.. _perfisSelecionados]));
+
+    private Task DevolverAcesso() => Executar(() => Gestao.DarAcessoPorEmailAsync(_vm!.Email, [.. _perfisSelecionados]));
+
+    private Task Revogar() => Executar(() => Acoes.RevogarAcessoAsync(Id));
+
+    private async Task Excluir()
+    {
+        var resultado = await ExecutarAsync(() => Gestao.ExcluirAsync(Id));
+        if (resultado?.Sucesso == true)
+        {
+            Navegacao.NavigateTo("/admin/usuarios");
+        }
+    }
+
+    private async Task Executar(Func<Task<ResultadoAcaoVm>> acao) => await ExecutarAsync(acao);
+
+    private async Task<ResultadoAcaoVm?> ExecutarAsync(Func<Task<ResultadoAcaoVm>> acao)
+    {
+        if (_executando || _vm is null)
+        {
+            return null;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        try
+        {
+            resultado = await acao();
+        }
+        finally
+        {
+            _executando = false;
+            _confirmar = Confirmacao.Nenhuma;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (resultado.Estado == EstadoAcaoUi.MfaRequerida)
+        {
+            Navegacao.NavigateTo(MapeadorAcaoAdmin.CaminhoStepUpMfa(Navegacao.Uri), forceLoad: true);
+            return resultado;
+        }
+
+        if (resultado.Sucesso)
+        {
+            await Recarregar();
+        }
+
+        return resultado;
+    }
+}

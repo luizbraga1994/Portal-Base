@@ -1,0 +1,8 @@
+@using PortalBase.Application.Identidade
+@* Regras da PoliticaSenha (a validação de verdade é do servidor). *@
+<ul class="help mb-4" aria-label="Regras da senha">
+    <li>De @PoliticaSenha.TamanhoMinimo a @PoliticaSenha.TamanhoMaximo caracteres, sem espaço no começo nem no fim.</li>
+    <li>Pelo menos 3 destes 4 tipos: letras minúsculas, maiúsculas, números e símbolos.</li>
+    <li>Sem repetir demais os mesmos caracteres.</li>
+    <li>Não pode conter o seu nome de usuário nem a parte do seu e-mail antes do @@.</li>
+</ul>

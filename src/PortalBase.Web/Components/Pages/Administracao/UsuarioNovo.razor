@@ -1,0 +1,268 @@
+@page "/admin/usuarios/novo"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Identidade
+@inject IDadosGestaoUsuarios Gestao
+@inject IDadosPerfis Perfis
+@inject IAutorizacaoVisual Visual
+@inject ServicoNotificacoes Notificacoes
+@inject NavigationManager Navegacao
+
+<PageTitle>Novo usuário · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Novo usuário"
+            Subtitulo="Cadastre uma pessoa e escolha os perfis e os contribuintes dela. Tudo é conferido e registrado na auditoria pelo servidor.">
+    <Acoes>
+        <a class="btn btn-secondary btn-sm" href="/admin/usuarios">&lsaquo; Usuários</a>
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Cadastrar usuários exige a permissão admin.usuarios. A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Carregando perfis…</p></div></div>
+}
+else if (_estado != EstadoConsultaUi.Ok)
+{
+    <div class="card"><EmptyState Emoji="&#127970;" Titulo="@(_estado == EstadoConsultaUi.SemTenant ? "Selecione um contribuinte" : "Não foi possível carregar")"
+        Mensagem="O cadastro de usuários é feito no contexto de um contribuinte autorizado." /></div>
+}
+else
+{
+    <div class="card card-pad mb-4" id="novo-usuario">
+        <h3 class="card-title">Dados do novo usuário</h3>
+        <div class="grid grid-2 gap-4 mt-4">
+            <div class="field">
+                <label for="novo-nome">Nome completo</label>
+                <input class="input" id="novo-nome" maxlength="200" @bind="_nome" @bind:event="oninput" autocomplete="off" />
+            </div>
+            <div class="field">
+                <label for="novo-email">E-mail (é o login)</label>
+                <input class="input" id="novo-email" type="email" maxlength="256" @bind="_email" @bind:event="oninput" autocomplete="off" />
+            </div>
+            <div class="field">
+                <label for="novo-login">Nome de usuário</label>
+                <input class="input mono" id="novo-login" maxlength="128" @bind="_login" @bind:event="oninput" autocomplete="off" placeholder="ex.: maria.souza" />
+                <div class="help">Identificação curta: 3 a 128 caracteres (letras, números, ponto, hífen, sublinhado ou @@), sem espaços. O login é feito pelo e-mail.</div>
+            </div>
+        </div>
+
+        <h4 class="h-95 mt-2">Perfis neste contribuinte</h4>
+        <SeletorPerfis Perfis="_perfis" Selecionados="_selecionados" Prefixo="novo">
+            <Adicional>
+                <div class="perfil-opcao perfil-opcao--plataforma" id="novo-perfil-plataforma">
+                    <span class="perfil-opcao__icone" aria-hidden="true">&#128081;</span>
+                    <span>
+                        <span class="fw-700">Administrador da plataforma</span>
+                        <span class="badge badge-bad ml-1">global</span>
+                        <span class="perfil-opcao__desc">Acesso total a todos os contribuintes, sem MFA. É concedido depois do cadastro, em
+                            <strong>Editar</strong>, por um Administrador da plataforma.</span>
+                    </span>
+                </div>
+            </Adicional>
+        </SeletorPerfis>
+
+        @if (TemOutros)
+        {
+            <h4 class="h-95 mt-4">Contribuintes</h4>
+            <p class="text-sm text-muted mt-1">
+                Marque outros contribuintes que esta pessoa também vai acessar — com a mesma conta e os mesmos perfis (só perfis do
+                sistema, quando houver mais de um contribuinte). Aparecem só os que você administra.
+            </p>
+            <ListaContribuintes Itens="_contribuintes" Marcados="_contribuintesNovo" Prefixo="novo" Id="novo-contribuintes" Desabilitado="_executando" />
+        }
+
+        <h4 class="h-95 mt-4">Senha</h4>
+        <div class="row wrap gap-6 mt-2">
+            @if (Gestao.EnvioDeLinkDisponivel)
+            {
+                <label class="row gap-2 ai-center">
+                    <input type="radio" name="modo-senha" id="senha-link" checked="@(_modoSenha == ModoLink)" @onchange="() => _modoSenha = ModoLink" />
+                    <span class="text-sm">Enviar por e-mail um link para a pessoa criar a senha (recomendado)</span>
+                </label>
+                <label class="row gap-2 ai-center">
+                    <input type="radio" name="modo-senha" id="senha-temporaria-radio" checked="@(_modoSenha == ModoTemporaria)" @onchange="() => _modoSenha = ModoTemporaria" />
+                    <span class="text-sm">Gerar uma senha aleatória e enviar por e-mail (a pessoa troca no primeiro acesso)</span>
+                </label>
+            }
+            <label class="row gap-2 ai-center">
+                <input type="radio" name="modo-senha" id="senha-inicial-radio" checked="@(_modoSenha == ModoInicial)" @onchange="() => _modoSenha = ModoInicial" />
+                <span class="text-sm">Definir uma senha inicial agora</span>
+            </label>
+        </div>
+        @if (_modoSenha == ModoInicial)
+        {
+            <div class="field mt-3 mw-400">
+                <label for="novo-senha">Senha inicial</label>
+                <input class="input" id="novo-senha" type="password" autocomplete="new-password" maxlength="@PoliticaSenha.TamanhoMaximo"
+                       @bind="_senha" @bind:event="oninput" />
+                <div class="help">De 12 a 128 caracteres, com pelo menos 3 destes tipos: minúsculas, maiúsculas, números e símbolos. Passe-a à pessoa por um canal seguro; ela pode trocar em "Minha conta".</div>
+            </div>
+        }
+
+        <h4 class="h-95 mt-4">Verificação em duas etapas (MFA)</h4>
+        <label class="row gap-2 ai-center mt-2">
+            <input type="checkbox" id="novo-exigir-mfa" @bind="_exigirMfa" />
+            <span class="text-sm">Exigir a verificação em duas etapas: no primeiro acesso, a pessoa cadastra o aplicativo autenticador lendo um QR code</span>
+        </label>
+
+        <div class="row gap-3 mt-4">
+            <button class="btn btn-primary" id="btn-cadastrar" @onclick="Cadastrar" disabled="@_executando">Cadastrar usuário</button>
+            <a class="btn btn-ghost" href="/admin/usuarios">Cancelar</a>
+        </div>
+    </div>
+
+    <div class="card card-pad" id="dar-acesso">
+        <h3 class="card-title">Dar acesso a um usuário que já existe</h3>
+        <p class="text-sm text-muted mt-2">
+            A pessoa já usa o portal em outro contribuinte? Informe o e-mail dela e os perfis que terá aqui — a conta,
+            a senha e o MFA continuam os mesmos.
+        </p>
+        <div class="field mt-3 mw-400">
+            <label for="existente-email">E-mail do usuário</label>
+            <input class="input" id="existente-email" type="email" maxlength="256" @bind="_emailExistente" @bind:event="oninput" autocomplete="off" />
+        </div>
+        <SeletorPerfis Perfis="_perfis" Selecionados="_selecionadosExistente" Prefixo="existente" />
+        @if (TemOutros)
+        {
+            <h4 class="h-95 mt-4">Contribuintes</h4>
+            <p class="text-sm text-muted mt-1">Dê acesso também a outros contribuintes que você administra, com os mesmos perfis (só perfis do sistema).</p>
+            <ListaContribuintes Itens="_contribuintes" Marcados="_contribuintesExistente" Prefixo="existente" Id="existente-contribuintes" Desabilitado="_executando" />
+        }
+        <div class="row gap-3 mt-4">
+            <button class="btn btn-secondary" id="btn-dar-acesso" @onclick="DarAcesso" disabled="@_executando">Dar acesso</button>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas =
+        [new Migalha("Administração", "/admin"), new Migalha("Usuários", "/admin/usuarios"), new Migalha("Novo")];
+
+    private bool _carregando = true;
+    private bool _executando;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemTenant;
+    private IReadOnlyList<PerfilGestao> _perfis = [];
+    private readonly HashSet<Guid> _selecionados = [];
+    private readonly HashSet<Guid> _selecionadosExistente = [];
+    private string _nome = string.Empty;
+    private string _email = string.Empty;
+    private string _login = string.Empty;
+    private string _senha = string.Empty;
+    private string _emailExistente = string.Empty;
+    private const string ModoLink = "link";
+    private const string ModoTemporaria = "temporaria";
+    private const string ModoInicial = "inicial";
+
+    private string _modoSenha = ModoInicial;
+    private bool _exigirMfa;
+    private IReadOnlyList<ContribuinteDoUsuario> _contribuintes = [];
+    private readonly HashSet<Guid> _contribuintesNovo = [];
+    private readonly HashSet<Guid> _contribuintesExistente = [];
+
+    private bool TemOutros => _contribuintes.Any(c => !c.Atual);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _modoSenha = Gestao.EnvioDeLinkDisponivel ? ModoLink : ModoInicial;
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            (_perfis, _estado) = await Perfis.ListarAsync();
+            (_contribuintes, _) = await Gestao.ListarContribuintesAdministradosAsync();
+        }
+
+        _carregando = false;
+    }
+
+    private async Task Cadastrar()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        ResultadoAcaoVm? outros = null;
+        try
+        {
+            // Vários contribuintes: os perfis precisam valer em todos (só do sistema) — conferido ANTES de cadastrar.
+            if (_contribuintesNovo.Count > 0 && await Gestao.ValidarPerfisParaVariosAsync([.. _selecionados]) is { } recusa)
+            {
+                MapeadorAcaoAdmin.Notificar(Notificacoes, recusa);
+                return;
+            }
+
+            resultado = await Gestao.CriarAsync(new NovoUsuario(
+                _login, _nome, _email, _modoSenha == ModoInicial ? _senha : null, [.. _selecionados],
+                EnviarLinkSenha: _modoSenha == ModoLink, ExigirMfa: _exigirMfa, GerarSenhaTemporaria: _modoSenha == ModoTemporaria));
+            if (resultado.Sucesso && resultado.Id is Guid criado && _contribuintesNovo.Count > 0)
+            {
+                outros = await Gestao.DarAcessoEmOutrosAsync(criado, [.. _contribuintesNovo], [.. _selecionados]);
+            }
+        }
+        finally
+        {
+            _executando = false;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (outros is not null)
+        {
+            MapeadorAcaoAdmin.Notificar(Notificacoes, outros);
+        }
+
+        if (resultado.Sucesso && resultado.Id is Guid id)
+        {
+            _senha = string.Empty;
+            Navegacao.NavigateTo($"/admin/usuarios/{id}");
+        }
+    }
+
+    private async Task DarAcesso()
+    {
+        if (_executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        ResultadoAcaoVm? outros = null;
+        try
+        {
+            if (_contribuintesExistente.Count > 0 && await Gestao.ValidarPerfisParaVariosAsync([.. _selecionadosExistente]) is { } recusa)
+            {
+                MapeadorAcaoAdmin.Notificar(Notificacoes, recusa);
+                return;
+            }
+
+            resultado = await Gestao.DarAcessoPorEmailAsync(_emailExistente, [.. _selecionadosExistente]);
+            if (resultado.Sucesso && resultado.Id is Guid usuario && _contribuintesExistente.Count > 0)
+            {
+                outros = await Gestao.DarAcessoEmOutrosAsync(usuario, [.. _contribuintesExistente], [.. _selecionadosExistente]);
+            }
+        }
+        finally
+        {
+            _executando = false;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (outros is not null)
+        {
+            MapeadorAcaoAdmin.Notificar(Notificacoes, outros);
+        }
+
+        if (resultado.Sucesso && resultado.Id is Guid id)
+        {
+            Navegacao.NavigateTo($"/admin/usuarios/{id}");
+        }
+    }
+}

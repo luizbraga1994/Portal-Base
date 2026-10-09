@@ -1,0 +1,110 @@
+@page "/admin/permissoes"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Identidade
+@inject IAutorizacaoVisual Visual
+@inject IDadosPerfis Perfis
+
+<PageTitle>Permissões · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Permissões"
+            Subtitulo="Tudo o que o portal permite fazer, agrupado por assunto, e quais perfis dão cada permissão. Para mudar quem pode o quê, edite os perfis (ou crie um personalizado) e escolha os perfis de cada usuário.">
+    <Acoes>
+        <a class="btn btn-secondary btn-sm" href="/admin/perfis">Ver perfis →</a>
+        @if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            <a class="btn btn-primary btn-sm" href="/admin/perfis/novo">+ Novo perfil</a>
+        }
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Ver o catálogo de permissões exige a permissão de administração de usuários (admin.usuarios). A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else
+{
+    <div class="card card-pad mb-4">
+        <div class="row gap-3 ai-start">
+            <span class="fs-13" aria-hidden="true">&#128273;</span>
+            <div>
+                <div class="fw-700">@CatalogoPermissoesUi.TodasAsChaves.Count permissões em @CatalogoPermissoesUi.Grupos.Count domínios</div>
+                <p class="text-sm text-muted mtx-035">
+                    A coluna <strong>Você tem</strong> reflete o conjunto efetivo do seu principal (derivado do servidor).
+                    @(Visual.Demonstracao ? "Modo demonstração ativo: o conjunto vem do perfil de demonstração selecionado." : "As permissões de alto impacto exigem verificação em duas etapas (MFA) no momento da ação.")
+                </p>
+            </div>
+        </div>
+    </div>
+
+    @foreach (var grupo in CatalogoPermissoesUi.Grupos)
+    {
+        <div class="card card-pad mb-4">
+            <div class="card-head plain">
+                <h3 class="h-95">@grupo.Dominio</h3>
+            </div>
+            <p class="text-sm text-muted m-035005">@grupo.Descricao</p>
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th>Permissão</th><th>Chave</th><th>MFA</th><th>Perfis que dão</th><th>Você tem</th></tr></thead>
+                    <tbody>
+                        @foreach (var permissao in grupo.Permissoes)
+                        {
+                            <tr>
+                                <td class="fw-700">@permissao.Rotulo</td>
+                                <td class="mono text-sm">@permissao.Chave</td>
+                                <td>
+                                    @if (permissao.ExigeMfa)
+                                    {
+                                        <StatusBadge Texto="Exige MFA" Situacao="warn" />
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                                <td class="text-sm">@PerfisQueDao(permissao.Chave)</td>
+                                <td>
+                                    @if (Visual.Pode(permissao.Chave))
+                                    {
+                                        <StatusBadge Texto="Sim" Situacao="ok" />
+                                    }
+                                    else
+                                    {
+                                        <StatusBadge Texto="Não" Situacao="neutral" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas =
+        [new Migalha("Administração", "/admin"), new Migalha("Permissões")];
+
+    private IReadOnlyList<PerfilGestao> _perfis = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            (_perfis, _) = await Perfis.ListarAsync();
+        }
+    }
+
+    // O Administrador da plataforma tem todas; as de plataforma SÓ ele tem (não entram em perfis do contribuinte).
+    private string PerfisQueDao(string chave)
+    {
+        var nomes = _perfis.Where(p => p.Permissoes.Contains(chave)).Select(p => p.Nome).ToList();
+        nomes.Add("Administrador da plataforma");
+        return string.Join(", ", nomes);
+    }
+}

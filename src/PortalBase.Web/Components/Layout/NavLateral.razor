@@ -1,0 +1,76 @@
+@* Barra lateral: módulos filtrados por RBAC (§6/§7). A ausência no menu é UX, não segurança.
+   Os grupos expansíveis são dropdowns: o servidor entrega ABERTO o grupo da tela atual (e destaca só o item atual —
+   o de rota mais longa que casa com o endereço). Abrir/fechar à mão é tratado por wwwroot/js/portalbase.js
+   (data-ui="alternar-grupo"), que lembra no navegador os grupos abertos e os reaplica a cada navegação.
+   Cada grupo tem ícone e número; cada item, um marcador (menu aberto) e um ícone (menu recolhido) — ver portalbase.css. *@
+@using System.Globalization
+@inject NavigationManager Navegacao
+
+<aside class="sidebar" id="nav-principal" aria-label="Navegação principal">
+    @{
+        var ativo = NavegacaoPortal.ItemAtivo(Grupos, Navegacao.ToBaseRelativePath(Navegacao.Uri));
+        var posicao = 0;
+    }
+    @foreach (var grupo in Grupos)
+    {
+        var numero = (++posicao).ToString("00", CultureInfo.InvariantCulture);
+        var grupoAtivo = ativo is not null && grupo.Itens.Any(i => ReferenceEquals(i, ativo));
+        if (!grupo.Expansivel)
+        {
+            <div class="@(grupoAtivo ? "nav-group nav-group--ativo" : "nav-group")">
+                <div class="nav-group-title">
+                    @Cabecalho(grupo, numero)
+                </div>
+                <div class="nav-group-itens">
+                    @foreach (var item in grupo.Itens)
+                    {
+                        @Item(item, ReferenceEquals(item, ativo))
+                    }
+                </div>
+            </div>
+            continue;
+        }
+
+        <div class="@(grupoAtivo ? "nav-group nav-group--expansivel nav-group--ativo is-open" : "nav-group nav-group--expansivel")"
+             data-grupo="@grupo.Chave">
+            <button type="button" class="nav-group-toggle" data-ui="alternar-grupo"
+                    aria-expanded="@(grupoAtivo ? "true" : "false")" aria-controls="nav-grupo-@grupo.Chave">
+                @Cabecalho(grupo, numero)
+                <IconeLinha Nome="seta-direita" Tamanho="14" Traco="2" Classe="ng-caret" />
+            </button>
+            <div class="nav-group-itens" id="nav-grupo-@grupo.Chave">
+                @foreach (var item in grupo.Itens)
+                {
+                    @Item(item, ReferenceEquals(item, ativo))
+                }
+            </div>
+        </div>
+    }
+    <div class="sidebar-foot">
+        <div class="text-xs">Portal Base · Andersen Consulting</div>
+    </div>
+</aside>
+
+@code {
+    [Parameter] public IReadOnlyList<GrupoNavegacao> Grupos { get; set; } = [];
+
+    private static RenderFragment Cabecalho(GrupoNavegacao grupo, string numero) =>
+        @<text>
+            <span class="ng-icone" aria-hidden="true"><IconeLinha Nome="@grupo.Icone" /></span>
+            <span class="ng-texto">
+                <span class="ng-indice" aria-hidden="true">@numero</span>
+                <span class="ng-label">@grupo.Titulo</span>
+            </span>
+        </text>;
+
+    private static RenderFragment Item(ItemNavegacao item, bool ativo) =>
+        @<a class="@(ativo ? "nav-item active" : "nav-item")" href="@item.Rota" aria-current="@(ativo ? "page" : null)" title="@item.Rotulo">
+            <span class="ni-marca" aria-hidden="true"></span>
+            <span class="ni-icon" aria-hidden="true"><IconeLinha Nome="@item.Icone" /></span>
+            <span class="ni-label">@item.Rotulo</span>
+            @if (item.EmPreparacao)
+            {
+                <span class="ni-badge chip-brand">em breve</span>
+            }
+        </a>;
+}

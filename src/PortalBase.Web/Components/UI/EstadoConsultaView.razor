@@ -1,0 +1,65 @@
+@* Wrapper de estados de consulta (§25/§26/§27): loading / SemTenant / SemPermissao / Erro / vazio → conteúdo.
+   Centraliza os estados operacionais de todas as telas fiscais ligadas a read-models reais. *@
+@if (Carregando)
+{
+    <div class="state" role="status" aria-live="polite">
+        <span class="spin" aria-hidden="true"></span>
+        <p class="mt-3">@TextoCarregando</p>
+    </div>
+}
+else if (Estado == EstadoConsultaUi.SemTenant)
+{
+    <EmptyState Emoji="&#127970;" Titulo="Selecione um contribuinte" Mensagem="@TextoSemTenant">
+        <Acao>@AcaoSemTenant</Acao>
+    </EmptyState>
+}
+else if (Estado == EstadoConsultaUi.SemPermissao)
+{
+    <EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+                Mensagem="Seu perfil não tem acesso a esta consulta. A decisão de autorização é validada no servidor." />
+}
+else if (Estado == EstadoConsultaUi.Erro)
+{
+    <div class="state" role="alert">
+        <div class="st-emoji" aria-hidden="true">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3>
+        <p>@TextoErro</p>
+    </div>
+}
+else if (Vazio)
+{
+    <EmptyState Emoji="&#128269;" Titulo="@TituloVazio" Mensagem="@MensagemVazio" />
+}
+else
+{
+    @ChildContent
+}
+
+@code {
+    /// <summary>Estado retornado pela fonte de dados.</summary>
+    [Parameter] public EstadoConsultaUi Estado { get; set; }
+
+    /// <summary>Consulta em andamento (spinner).</summary>
+    [Parameter] public bool Carregando { get; set; }
+
+    /// <summary>Resultado Ok porém sem itens.</summary>
+    [Parameter] public bool Vazio { get; set; }
+
+    [Parameter] public string TextoCarregando { get; set; } = "Consultando…";
+
+    [Parameter] public string TextoSemTenant { get; set; } =
+        "Esta consulta ocorre no contexto de um contribuinte autorizado. Selecione um contribuinte para continuar.";
+
+    [Parameter] public string TextoErro { get; set; } =
+        "A consulta falhou ou o acesso não foi autorizado. Nenhum detalhe interno é exibido.";
+
+    [Parameter] public string TituloVazio { get; set; } = "Nenhum registro encontrado";
+
+    [Parameter] public string MensagemVazio { get; set; } = "Ajuste os filtros ou limpe a pesquisa.";
+
+    /// <summary>Conteúdo exibido quando há dados (Ok + itens).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Ação opcional no estado "sem contribuinte" (ex.: link para seleção).</summary>
+    [Parameter] public RenderFragment? AcaoSemTenant { get; set; }
+}

@@ -1,0 +1,43 @@
+@* Filtro de PERÍODO reutilizável (Prompt 40, §10; validação no Prompt 81) — intervalo desde/até (datas).
+   Emite DateTimeOffset? em UTC (desde 00:00:00Z, até 23:59:59.999999Z — fim do dia INCLUSIVO, ver
+   PeriodoConsulta). Campos vazios ⇒ null (sem limite). Desde > Até ⇒ mensagem de validação; a página NÃO
+   consulta (PeriodoConsulta.EhValido) e o servidor rejeita de novo. Acessível (aria-labels/aria-invalid). *@
+@using PortalBase.Application.Consultas
+<div class="row gap-2 ai-center wrap">
+    <label class="text-sm text-muted m-0">@Rotulo</label>
+    <input class="input mw-150" type="date" value="@_desdeStr"
+           @onchange="OnDesde" aria-label="@($"{Rotulo}: data inicial")" aria-invalid="@(Invalido ? "true" : "false")" />
+    <span class="text-muted" aria-hidden="true">→</span>
+    <input class="input mw-150" type="date" value="@_ateStr"
+           @onchange="OnAte" aria-label="@($"{Rotulo}: data final")" aria-invalid="@(Invalido ? "true" : "false")" />
+    @if (Invalido)
+    {
+        <span class="text-sm text-bad" role="alert" data-testid="periodo-invalido">@PeriodoConsulta.MensagemPeriodoInvalido</span>
+    }
+</div>
+
+@code {
+    /// <summary>Qual carimbo o período filtra (ex.: "Criado em") — explícito para não haver semântica implícita.</summary>
+    [Parameter] public string Rotulo { get; set; } = "Período";
+
+    [Parameter] public DateTimeOffset? Desde { get; set; }
+    [Parameter] public EventCallback<DateTimeOffset?> DesdeChanged { get; set; }
+
+    [Parameter] public DateTimeOffset? Ate { get; set; }
+    [Parameter] public EventCallback<DateTimeOffset?> AteChanged { get; set; }
+
+    private string _desdeStr = string.Empty;
+    private string _ateStr = string.Empty;
+
+    private bool Invalido => !PeriodoConsulta.EhValido(Desde, Ate);
+
+    protected override void OnParametersSet()
+    {
+        _desdeStr = PeriodoUi.Formatar(Desde);
+        _ateStr = PeriodoUi.Formatar(Ate);
+    }
+
+    private async Task OnDesde(ChangeEventArgs e) => await DesdeChanged.InvokeAsync(PeriodoUi.Interpretar(e.Value?.ToString(), fimDoDia: false));
+
+    private async Task OnAte(ChangeEventArgs e) => await AteChanged.InvokeAsync(PeriodoUi.Interpretar(e.Value?.ToString(), fimDoDia: true));
+}

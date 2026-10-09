@@ -1,0 +1,256 @@
+name: Security
+
+# Pipeline de SEGURANÇA da aplicação (Prompt 52). Complementa `ci.yml` (build/test/SCA/secret gate).
+# Roda em PRs para o branch principal e no próprio principal (gating de release), agendado semanalmente,
+# e sob demanda. NÃO roda em cada push de feature (evita execuções pesadas repetidas).
+#
+# Least-privilege: permissão global apenas `contents: read`; cada job eleva SOMENTE o que precisa.
+# Sem `continue-on-error` nos GATES de segurança. As únicas exceções documentadas são a PUBLICAÇÃO de
+# SARIF no code scanning e o dependency-review, que dependem do GitHub Advanced Security (recurso de
+# plataforma) — publicar resultado ≠ portão; os portões reais (exit-code do Trivy/gitleaks/SCA) continuam
+# hard-fail. Ver docs/SECURITY-CI.md (Fase 18/19/20).
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+  schedule:
+    - cron: '27 4 * * 1'   # segunda-feira, 04:27 UTC (varredura periódica de dependências/imagens)
+
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+  # Política de gate: severidades que FALHAM o pipeline (Fase 18). Ajustável por decisão documentada.
+  SEVERIDADES_GATE: 'CRITICAL,HIGH'
+
+jobs:
+  # ---- CodeQL (SAST) — Fase 4/5/6 ----
+  codeql:
+    name: CodeQL (C#)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # necessário para publicar o resultado no code scanning (GHAS)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inicializar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          build-mode: none       # análise buildless de C# (robusta; não mascara erro de build)
+      - name: Analisar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:csharp'
+
+  # ---- Dependency Review (apenas em PR) — Fase 7/13 ----
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revisar dependências novas/atualizadas
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high        # política: HIGH/CRITICAL bloqueiam (Fase 7/18)
+          comment-summary-in-pr: on-failure
+
+  # ---- SCA .NET (dotnet list --vulnerable) — Fase 8 (GATE real) ----
+  dotnet-sca:
+    name: SCA .NET (vulnerable packages)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore PortalBase.sln
+      - name: Gate de pacotes vulneráveis (Critical/High)
+        run: |
+          saida=$(dotnet list PortalBase.sln package --vulnerable --include-transitive 2>&1)
+          echo "$saida"
+          if echo "$saida" | grep -qiE "Critical|High"; then
+            echo "::error::Pacotes vulneráveis (Critical/High) — corrija antes de mesclar."
+            exit 1
+          fi
+          echo "Nenhum pacote vulnerável Critical/High."
+
+  # ---- Secret scanning (gitleaks) — Fase 9/10/20 ----
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # histórico para varredura completa
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'   # nunca publicar dumps de segredo como artefato (§21/§27)
+
+  # ---- Trivy filesystem (deps + secrets + misconfig) — Fase 11/13 ----
+  trivy-fs:
+    name: Trivy FS
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy FS (SARIF)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          skip-dirs: 'bin,obj,artifacts,**/bin,**/obj,TestResults'
+          severity: CRITICAL,HIGH
+      - name: Publicar SARIF (best-effort — requer code scanning/GHAS)
+        continue-on-error: true   # EXCEÇÃO documentada: publicação, não é o portão (Fase 18/20)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+      - name: Gate Trivy FS (hard-fail em CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          skip-dirs: 'bin,obj,artifacts,**/bin,**/obj,TestResults'
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # ---- Trivy config / IaC (Dockerfiles + compose) — Fase 14 ----
+  trivy-config:
+    name: Trivy Config (IaC)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy config (SARIF)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          severity: CRITICAL,HIGH
+      - name: Publicar SARIF (best-effort — requer GHAS)
+        continue-on-error: true   # EXCEÇÃO documentada (publicação)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+      - name: Gate Trivy config (hard-fail em CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+
+  # ---- Trivy image (containers Web + Worker) — Fase 12 ----
+  trivy-image:
+    name: Trivy Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile.Web
+            tag: portalbase-web:scan
+          - dockerfile: Dockerfile.Worker
+            tag: portalbase-worker:scan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build da imagem
+        run: docker build -f ${{ matrix.dockerfile }} -t ${{ matrix.tag }} .
+      - name: Gate Trivy image (hard-fail em CRITICAL/HIGH; ignora sem correção)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.tag }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # ---- SBOM (CycloneDX) — Fase 15/21 ----
+  sbom:
+    name: SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Instalar CycloneDX
+        run: dotnet tool install --global CycloneDX
+      - name: Gerar SBOM
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          mkdir -p artifacts/sbom
+          dotnet CycloneDX PortalBase.sln -o artifacts/sbom -fn sbom-portalbase.cdx.json -F Json
+      - name: Publicar SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-cyclonedx
+          path: artifacts/sbom/sbom-portalbase.cdx.json
+          if-no-files-found: error
+
+  # ---- Resumo de segurança — Fase 22 ----
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [codeql, dotnet-sca, gitleaks, trivy-fs, trivy-config, trivy-image, sbom]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Escrever resumo
+        run: |
+          {
+            echo "## Security Scan"
+            echo ""
+            echo "| Controle | Resultado |"
+            echo "|----------|-----------|"
+            echo "| CodeQL (C#) | ${{ needs.codeql.result }} |"
+            echo "| SCA .NET | ${{ needs.dotnet-sca.result }} |"
+            echo "| Secret scan (gitleaks) | ${{ needs.gitleaks.result }} |"
+            echo "| Trivy FS | ${{ needs.trivy-fs.result }} |"
+            echo "| Trivy Config (IaC) | ${{ needs.trivy-config.result }} |"
+            echo "| Trivy Image | ${{ needs.trivy-image.result }} |"
+            echo "| SBOM | ${{ needs.sbom.result }} |"
+            echo ""
+            echo "_success = PASS · failure = FAIL · skipped/cancelled = ver política._"
+          } >> "$GITHUB_STEP_SUMMARY"

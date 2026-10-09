@@ -1,0 +1,109 @@
+<Project>
+
+  <!--
+    Central Package Management (CPM): as versões de TODOS os pacotes NuGet ficam
+    aqui; os .csproj referenciam sem <Version>. Garante consistência entre os
+    11 projetos da solution.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="EF Core 10 + MySQL">
+    <!-- DECISÃO TÉCNICA: provider Oracle (MySql.EntityFrameworkCore) porque o
+         Pomelo ainda não publicou build para EF Core 10. Stack mandatória
+         (MySQL 8.4 + EF Core 10) preservada; migrar para Pomelo quando houver
+         build EF Core 10. Ver README / relatório do Prompt 01. -->
+    <PackageVersion Include="MySql.EntityFrameworkCore" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Observabilidade">
+    <PackageVersion Include="Serilog" Version="4.3.0" />
+    <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageVersion Include="Serilog.Extensions.Hosting" Version="9.0.0" />
+    <PackageVersion Include="Serilog.Settings.Configuration" Version="9.0.0" />
+    <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
+    <!-- Log de Aplicativo do Windows (servidor próprio: Web no IIS e Worker como serviço). -->
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.12" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testes">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="coverlet.collector" Version="10.1.0" />
+    <!-- FluentAssertions 7.x é a última linha Apache-2.0 (gratuita). A partir da
+         8.0 exige licença comercial paga. Pin em 7.x é decisão de licenciamento. -->
+    <PackageVersion Include="FluentAssertions" Version="7.2.2" />
+    <PackageVersion Include="Testcontainers.MySql" Version="4.14.0" />
+    <PackageVersion Include="Xunit.SkippableFact" Version="1.5.85" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+    <!-- Browser E2E (Prompt 54). Versão casada com o Chromium pré-instalado no ambiente
+         (build 1194 = Chromium 141 = Playwright 1.56.x), para NÃO baixar navegador em
+         runtime (rede restrita); o driver localiza o browser via PLAYWRIGHT_BROWSERS_PATH. -->
+    <PackageVersion Include="Microsoft.Playwright" Version="1.56.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Hospedagem (Worker)">
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <!-- Worker como serviço do Windows (servidor próprio/IIS). Fora do Windows não tem efeito. -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Abstrações Microsoft.Extensions (usadas por class libraries)">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Identidade / hashing de senha">
+    <!-- Reuso do hasher vetado do ASP.NET Core Identity (PBKDF2-HMAC-SHA512,
+         formato versionado). NÃO se adota o schema/UI do Identity: o Usuario é
+         agregado do domínio. Apenas a primitiva de hash (Prompt 04, seção 5). -->
+    <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Cofre gerenciado (Azure Key Vault via identidade gerenciada)">
+    <!-- Prompt 06: cofre gerenciado de segredos. A autenticação usa DefaultAzureCredential
+         (Managed Identity / Workload Identity) — NENHUM client secret estático na aplicação. -->
+    <PackageVersion Include="Azure.Security.KeyVault.Secrets" Version="4.11.2" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+    <!-- Cofre local do Windows (Vault:Modo=CofreWindows): DPAPI da máquina para servidor próprio/IIS sem Azure. -->
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="Assinatura digital XMLDSig (Prompt 25)">
+    <!-- SignedXml (System.Security.Cryptography.Xml) NÃO faz parte do shared framework do .NET;
+         é o pacote oficial da Microsoft para XMLDSig. Usa API criptográfica robusta (nunca string). -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup Label="E-mail transacional (SMTP)">
+    <!-- Envio de e-mail (ex.: redefinição de senha). MailKit: SMTP com STARTTLS/TLS implícito, validação de
+         certificado, timeout e CancellationToken; MimeKit monta a mensagem (codificação de cabeçalhos segura). -->
+    <PackageVersion Include="MailKit" Version="4.18.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="QR code (cadastro do MFA)">
+    <!-- QR code do cadastro do autenticador (otpauth://), gerado NO SERVIDOR como PNG (data: URI — CSP img-src 'self'
+         data:). Sem dependência de System.Drawing nem de script externo. MIT. -->
+    <PackageVersion Include="QRCoder" Version="1.8.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Analisadores">
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
+  </ItemGroup>
+
+</Project>

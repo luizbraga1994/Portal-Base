@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    INTEGRATION.TESTS: sobe dependências reais (MySQL via Testcontainers) e valida
+    o boot dos hosts (WebApplicationFactory). Testes que exigem Docker são pulados
+    automaticamente quando o daemon não está disponível (ver DockerDisponivel).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Testcontainers.MySql" />
+    <PackageReference Include="Xunit.SkippableFact" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PortalBase.Web\PortalBase.Web.csproj" />
+    <ProjectReference Include="..\..\src\PortalBase.Worker\PortalBase.Worker.csproj" />
+    <ProjectReference Include="..\..\src\PortalBase.Infrastructure\PortalBase.Infrastructure.csproj" />
+    <!-- Ferramenta de desenvolvimento (acesso local): testada aqui contra o MySQL real da coleção multi-tenant. -->
+    <ProjectReference Include="..\..\tools\PortalBase.AcessoLocal\PortalBase.AcessoLocal.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

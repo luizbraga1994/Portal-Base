@@ -1,0 +1,114 @@
+name: Script de ambiente (Windows PowerShell 5.1)
+
+# Executa scripts/configurar-ambiente-local.ps1 DE VERDADE no ambiente-alvo do desenvolvedor: Windows PowerShell 5.1
+# (shell `powershell` do runner; `pwsh` seria o 7) contra o MySQL 8.0 que acompanha a imagem windows-latest
+# (instalado, não iniciado — o harness inicializa um datadir descartável). A 1ª execução real no Windows falhou no
+# PARSE (arquivo sem BOM lido como ANSI 1252); a varredura em ScriptsPowerShellCodificacaoTests impede a regressão de
+# codificação e este job prova o restante (ACL NTFS, user-secrets, contas MySQL, migrations, Web lendo a configuração)
+# e o scripts/criar-acesso-local.ps1 (acesso local criado de verdade + login HTTP na Web com ele).
+# Detalhes das verificações: scripts/ci/validar-configurar-ambiente-local.ps1.
+
+# Economia de minutos (o runner Windows conta em dobro): só no PR para o master (e manualmente).
+on:
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'scripts/**'
+      - 'tools/**'
+      - 'src/PortalBase.Infrastructure/Persistencia/Catalogo/**'
+      - 'src/PortalBase.Infrastructure/Segredos/**'
+      - '.config/dotnet-tools.json'
+      - '.github/workflows/script-ambiente-windows.yml'
+  workflow_dispatch:
+
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+
+jobs:
+  windows-powershell-51:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compilar a Web (Release, warnings como erro)
+        shell: pwsh
+        run: dotnet build src/PortalBase.Web/PortalBase.Web.csproj -c Release -warnaserror
+
+      - name: Compilar o comando de acesso local (Debug, o mesmo que o dotnet run do script usa)
+        shell: pwsh
+        run: dotnet build tools/PortalBase.AcessoLocal/PortalBase.AcessoLocal.csproj -warnaserror
+
+      - name: Validar o script no Windows PowerShell 5.1 com MySQL real
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          mysql --version
+          $dll = (Resolve-Path 'src\PortalBase.Web\bin\Release\net10.0\PortalBase.Web.dll').Path
+          $trabalho = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'ps51') -Force
+          .\scripts\ci\validar-configurar-ambiente-local.ps1 -DiretorioTrabalho $trabalho.FullName -DllWeb $dll -ShellAlvo powershell
+
+      - name: Validar o script no PowerShell 7 (Windows) com MySQL real
+        shell: powershell
+        run: |
+          pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          $dll = (Resolve-Path 'src\PortalBase.Web\bin\Release\net10.0\PortalBase.Web.dll').Path
+          $trabalho = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'ps7') -Force
+          .\scripts\ci\validar-configurar-ambiente-local.ps1 -DiretorioTrabalho $trabalho.FullName -DllWeb $dll -ShellAlvo pwsh -PortaMySql 3307 -PortaWeb 5252
+
+  # Cofre local do Windows (Vault:Modo=CofreWindows, servidor próprio/IIS): o scripts/cofre-windows.ps1 grava com o DPAPI
+  # REAL da máquina (Windows PowerShell 5.1 e PowerShell 7) e o portal (ProvedorSegredosCofreWindows) lê o que foi
+  # gravado — prova que os dois lados usam o mesmo formato e a mesma entropia. Nenhum valor é exibido.
+  cofre-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Gravar segredos pelo script (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $cofre = Join-Path $env:RUNNER_TEMP 'cofre'
+          .\scripts\cofre-windows.ps1 -Acao Preparar -Diretorio $cofre
+          .\scripts\cofre-windows.ps1 -Acao GerarChave -Diretorio $cofre -Nome portalbase-ci-chave
+          .\scripts\cofre-windows.ps1 -Acao GerarChave -Diretorio $cofre -Nome portalbase-ci-chave   # mantém a existente
+          $arquivo = Join-Path $env:RUNNER_TEMP 'arquivo-teste.txt'
+          [System.IO.File]::WriteAllText($arquivo, 'conteudo do arquivo de teste')
+          .\scripts\cofre-windows.ps1 -Acao ImportarArquivo -Diretorio $cofre -Nome portalbase-ci-arquivo -Arquivo $arquivo
+          .\scripts\cofre-windows.ps1 -Acao Testar -Diretorio $cofre -Nome portalbase-ci-chave
+          $nomes = @(.\scripts\cofre-windows.ps1 -Acao Listar -Diretorio $cofre)
+          if ($nomes.Count -ne 2) { throw "Esperava 2 segredos, achei $($nomes.Count)." }
+          "PORTALBASE_TEST_COFRE_SCRIPT=$cofre" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Gravar e testar pelo script (PowerShell 7)
+        shell: pwsh
+        run: |
+          $cofre = Join-Path $env:RUNNER_TEMP 'cofre-ps7'
+          ./scripts/cofre-windows.ps1 -Acao Preparar -Diretorio $cofre
+          ./scripts/cofre-windows.ps1 -Acao GerarChave -Diretorio $cofre -Nome portalbase-ci-ps7
+          ./scripts/cofre-windows.ps1 -Acao Testar -Diretorio $cofre -Nome portalbase-ci-ps7
+
+      - name: O portal lê o que o script gravou (DPAPI real)
+        shell: pwsh
+        run: dotnet test tests/PortalBase.Integration.Tests/PortalBase.Integration.Tests.csproj --filter "FullyQualifiedName~CofreWindowsTests" --logger "console;verbosity=normal"

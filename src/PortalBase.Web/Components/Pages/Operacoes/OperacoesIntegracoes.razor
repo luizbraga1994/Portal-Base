@@ -1,0 +1,97 @@
+@page "/operacoes/integracoes"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosOperacoes Dados
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Integrações (operação) · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Operações" Titulo="Integrações"
+            Subtitulo="Saúde da última integração externa (read-model ConsultaOperacoes): frescor de sucesso/falha. Nunca expõe token/segredo.">
+    <Acoes><button class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="A visão operacional exige a permissão de plataforma (seguranca.incidentes.gerir).">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando integrações…</p></div>
+}
+else if (_estado != EstadoConsultaUi.Ok || _painel is null)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou ou não foi autorizada.</p></div></div>
+}
+else if (_painel.IntegracoesSemTelemetria)
+{
+    <div class="card card-pad">
+        <div class="row gap-3 ai-start">
+            <span class="fs-14" aria-hidden="true">&#9888;&#65039;</span>
+            <div>
+                <div class="fw-700">Telemetria de integrações indisponível para esta camada</div>
+                <p class="text-sm text-muted mtx-04">
+                    O registro de saúde de integração é por processo; o host Web pode não ter observado
+                    integrações executadas em outro processo. Ausência de telemetria não é "saudável".
+                </p>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="dt-wrap">
+        <div class="dt-scroll">
+            <table class="dt">
+                <thead><tr><th>Integração</th><th>Estado</th><th class="tnum">Sucessos</th><th class="tnum">Falhas</th><th>Último sucesso</th><th>Última falha</th><th>Último erro</th></tr></thead>
+                <tbody>
+                    @foreach (var i in _painel.Integracoes)
+                    {
+                        <tr>
+                            <td class="fw-700">@i.Integracao</td>
+                            <td><StatusBadge Texto="@i.EstadoRotulo" Situacao="@i.EstadoBadge" /></td>
+                            <td class="tnum">@i.TotalSucesso.ToString("N0", _cultura)</td>
+                            <td class="tnum">@i.TotalFalha.ToString("N0", _cultura)</td>
+                            <td class="text-sm mono">@Data(i.UltimoSucessoUtc)</td>
+                            <td class="text-sm mono">@Data(i.UltimaFalhaUtc)</td>
+                            <td class="text-sm">@(i.UltimoErroCodigo is { Length: > 0 } c ? c : "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Operações", "/operacoes/saude"), new Migalha("Integrações")];
+    private static readonly CultureInfo _cultura = CultureInfo.GetCultureInfo("pt-BR");
+
+    private bool _carregando = true;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemPermissao;
+    private PainelOperacoesVm? _painel;
+
+    private static string Data(DateTimeOffset? d) => d is { } v ? v.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) : "—";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.SegurancaIncidentesGerir)) { await Carregar(); }
+        else { _carregando = false; }
+    }
+
+    private async Task Carregar()
+    {
+        _carregando = true;
+        try
+        {
+            var (painel, estado) = await Dados.ObterPainelAsync();
+            _painel = painel;
+            _estado = estado;
+        }
+        finally { _carregando = false; }
+    }
+}

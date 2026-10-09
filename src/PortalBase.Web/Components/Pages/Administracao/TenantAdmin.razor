@@ -1,0 +1,238 @@
+@page "/admin/tenant"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Domain.Catalogo
+@using PortalBase.Application.Administracao
+@inject IDadosTenantAdmin Dados
+@inject IDadosAcoesTenant Acoes
+@inject IAutorizacaoVisual Visual
+@inject ServicoNotificacoes Notificacoes
+
+<PageTitle>Contribuinte · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Contribuinte (tenant)"
+            Subtitulo="Dados cadastrais e estado do contribuinte selecionado. Nunca mostra segredo, connection string ou base física." />
+
+@if (!Visual.Pode(Permissoes.AdminTenant))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Ver a administração do contribuinte exige a permissão admin.tenant. A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando contribuinte…</p></div></div>
+}
+else if (_vm is null || _vm.Estado == EstadoConsultaUi.SemTenant)
+{
+    <div class="card"><EmptyState Emoji="&#128193;" Titulo="Selecione um contribuinte"
+        Mensagem="A administração do contribuinte é feita no contexto de um contribuinte autorizado. Selecione-o no topo." /></div>
+}
+else if (_vm.Estado == EstadoConsultaUi.SemPermissao)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="A consulta não foi autorizada pelo servidor (admin.tenant)." /></div>
+}
+else if (_vm.Estado == EstadoConsultaUi.Erro || _vm.Detalhe is null)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji" aria-hidden="true">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou. Nenhum detalhe interno é exibido.</p></div></div>
+}
+else
+{
+    var d = _vm.Detalhe;
+    var (rotuloEstado, badgeEstado) = AdminUi.EstadoTenant(d.Estado);
+    <div class="grid grid-3 mb-4">
+        <StatCard Rotulo="Situação" Valor="@rotuloEstado" Icone="&#127970;" Acento="@(!d.Operacional)" />
+        <StatCard Rotulo="Operacional" Valor="@(d.Operacional ? "Sim" : "Não")" Icone="&#9881;&#65039;" />
+        <StatCard Rotulo="Schema (última migração)" Valor="@AdminUi.ResumoSchema(d.SchemaVersion)" Icone="&#128190;" />
+    </div>
+
+    <div class="card card-pad">
+        <div class="card-head plain"><h3 class="h-95">Identificação e estado</h3></div>
+        <div class="dt-scroll mt-3">
+            <table class="dt">
+                <tbody>
+                    <tr><th class="w-220">Nome do tenant</th><td class="mono">@d.Nome</td></tr>
+                    <tr><th>CNPJ</th><td class="mono">@d.Cnpj</td></tr>
+                    <tr><th>Razão social</th><td>@d.RazaoSocial</td></tr>
+                    <tr><th>Situação</th><td><StatusBadge Texto="@rotuloEstado" Situacao="@badgeEstado" /></td></tr>
+                    <tr><th>Versão de schema</th><td class="mono">@(d.SchemaVersion ?? "—") @(d.UltimaMigracao is { Length: >0 } m ? $"(migração {m})" : "")</td></tr>
+                    <tr><th>Última falha registrada</th><td>@(d.ComErro ? "Sim (detalhe não exibido)" : "Não")</td></tr>
+                    <tr><th>Criado em (UTC)</th><td class="mono">@d.CriadoEmUtc.ToString("dd/MM/yyyy HH:mm", _ci)</td></tr>
+                    <tr><th>Atualizado em (UTC)</th><td class="mono">@d.AtualizadoEmUtc.ToString("dd/MM/yyyy HH:mm", _ci)</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-sm text-muted mtx-075">
+            O ciclo de vida (ativar/desabilitar/reativar) é executado por comando autorizado
+            (<span class="mono">admin.tenant</span> + auditoria). Novos contribuintes são cadastrados pelo Administrador da
+            plataforma, em Administração → Contribuintes.
+        </p>
+    </div>
+
+    <div class="card card-pad mt-4" id="dados-cadastrais">
+        <div class="card-head plain"><h3 class="h-95">Dados cadastrais</h3></div>
+        <p class="text-sm text-muted mt-2">
+            Altere a razão social. O <strong>nome do tenant</strong>
+            e o <strong>CNPJ</strong> não mudam: eles identificam o contribuinte e a base de dados dele (para outro CNPJ,
+            cadastre um novo contribuinte). Cada alteração é conferida no servidor e registrada na auditoria (antes e depois).
+        </p>
+        <div class="grid grid-2 mt-3">
+            <div class="field">
+                <label for="tenant-razao">Razão social</label>
+                <input class="input" id="tenant-razao" maxlength="@Tenant.TamanhoMaximoRazaoSocial" @bind="_razao" @bind:event="oninput" disabled="@_salvando" />
+            </div>
+        </div>
+        <div class="row wrap gap-3">
+            <button class="btn btn-primary" id="btn-salvar-tenant" type="button" @onclick="SalvarCadastro" disabled="@(_salvando || !CadastroAlterado)">
+                @(_salvando ? "Salvando…" : "Salvar dados")
+            </button>
+            <button class="btn btn-ghost" type="button" @onclick="() => PreencherCadastro(d)" disabled="@(_salvando || !CadastroAlterado)">Descartar alterações</button>
+        </div>
+    </div>
+
+    <div class="card card-pad mt-4">
+        <div class="card-head plain"><h3 class="h-95">Ciclo de vida</h3></div>
+        <p class="text-sm text-muted mt-2">
+            Transições de estado do contribuinte, executadas por comando autorizado, idempotente e auditado
+            no servidor. As transições disponíveis dependem do estado atual (<span class="mono">@d.Estado</span>).
+        </p>
+        <div class="row wrap gap-3 mt-3">
+            @if (d.Estado == EstadoProvisionamento.Pronto)
+            {
+                <button class="btn btn-primary" @onclick='() => Pedir("ativar")' disabled="@_executando">Ativar</button>
+            }
+            @if (d.Estado is EstadoProvisionamento.Ativo or EstadoProvisionamento.Pronto)
+            {
+                <button class="btn btn-danger" @onclick='() => Pedir("desabilitar")' disabled="@_executando">Desabilitar</button>
+            }
+            @if (d.Estado == EstadoProvisionamento.Desabilitado)
+            {
+                <button class="btn btn-primary" @onclick='() => Pedir("reativar")' disabled="@_executando">Reativar</button>
+            }
+            @if (d.Estado is EstadoProvisionamento.Pendente or EstadoProvisionamento.Provisionando or EstadoProvisionamento.Falhado)
+            {
+                <span class="text-sm text-muted">Nenhuma transição de ciclo de vida disponível no estado atual (provisionamento é operação de plataforma).</span>
+            }
+        </div>
+    </div>
+
+    <ConfirmacaoAcao Visivel="@(_acao is not null)" Perigoso="@(_acao == "desabilitar")" Processando="_executando"
+                     Titulo="@_tituloConfirmacao" Mensagem="@_mensagemConfirmacao" TextoConfirmar="@_textoConfirmacao"
+                     OnConfirmar="Confirmar" OnCancelar="() => _acao = null" />
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Administração", "/admin"), new Migalha("Contribuinte")];
+    private static readonly CultureInfo _ci = CultureInfo.InvariantCulture;
+
+    private bool _carregando = true;
+    private bool _executando;
+    private bool _salvando;
+    private string _razao = string.Empty;
+
+    private bool CadastroAlterado => _vm?.Detalhe is { } d
+        && !string.Equals(_razao.Trim(), d.RazaoSocial, StringComparison.Ordinal);
+    private string? _acao;
+    private TenantAdminVm? _vm;
+
+    private string _tituloConfirmacao => _acao switch
+    {
+        "ativar" => "Ativar contribuinte?",
+        "desabilitar" => "Desabilitar contribuinte?",
+        "reativar" => "Reativar contribuinte?",
+        _ => "Confirmar operação",
+    };
+
+    private string _mensagemConfirmacao => _acao switch
+    {
+        "ativar" => "O contribuinte pronto passará a operacional (a infraestrutura é validada no servidor). A operação é auditada.",
+        "desabilitar" => "O contribuinte deixará de ser operacional. A base de dados NÃO é removida. A operação é auditada.",
+        "reativar" => "O contribuinte desabilitado voltará a operacional após revalidação da infraestrutura. A operação é auditada.",
+        _ => string.Empty,
+    };
+
+    private string _textoConfirmacao => _acao switch
+    {
+        "ativar" => "Ativar",
+        "desabilitar" => "Desabilitar",
+        "reativar" => "Reativar",
+        _ => "Confirmar",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.AdminTenant))
+        {
+            _vm = await Dados.ObterAsync();
+            PreencherCadastro(_vm?.Detalhe);
+        }
+        _carregando = false;
+    }
+
+    private void PreencherCadastro(DetalheTenant? d)
+    {
+        _razao = d?.RazaoSocial ?? string.Empty;
+    }
+
+    private async Task SalvarCadastro()
+    {
+        if (_salvando || _vm?.Detalhe is not { } d)
+        {
+            return;
+        }
+
+        _salvando = true;
+        try
+        {
+            var resultado = await Acoes.AtualizarCadastroAsync(new DadosCadastroTenant(_razao), d.AtualizadoEmUtc);
+            MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+            if (resultado.Sucesso)
+            {
+                _vm = await Dados.ObterAsync(); // os dados gravados de verdade (e a nova data de atualização)
+                PreencherCadastro(_vm?.Detalhe);
+            }
+        }
+        finally
+        {
+            _salvando = false;
+        }
+    }
+
+    private void Pedir(string acao) => _acao = acao;
+
+    private async Task Confirmar()
+    {
+        if (_acao is null || _executando)
+        {
+            return;
+        }
+
+        var acao = _acao;
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        try
+        {
+            resultado = acao switch
+            {
+                "ativar" => await Acoes.AtivarAsync(),
+                "desabilitar" => await Acoes.DesabilitarAsync(),
+                "reativar" => await Acoes.ReativarAsync(),
+                _ => new ResultadoAcaoVm(false, EstadoAcaoUi.Invalido, "Operação inválida", "Ação não reconhecida."),
+            };
+        }
+        finally
+        {
+            _executando = false;
+            _acao = null;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (resultado.Sucesso)
+        {
+            _vm = await Dados.ObterAsync(); // reflete o novo estado real
+        }
+    }
+}

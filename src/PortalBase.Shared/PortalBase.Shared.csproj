@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SHARED: apenas contratos compartilhados entre camadas/hosts (resultados
+    padronizados, erros de aplicação, enums e contratos de integração).
+    NÃO deve conter entidades de domínio nem lógica de negócio. Sem deps de projeto.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>

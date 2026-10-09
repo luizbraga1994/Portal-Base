@@ -1,0 +1,46 @@
+@page "/conta/esqueci-senha"
+@layout LayoutEntrada
+@using PortalBase.Application.Identidade
+@inject RecuperacaoSenha Recuperacao
+
+<PageTitle>Esqueci a senha · Portal Base</PageTitle>
+
+<h1 class="auth__title">Esqueci a senha</h1>
+
+@if (Indisponivel == 1 || !Recuperacao.Disponivel)
+{
+    <div class="alert alert-warn mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+        <div class="a-body">A recuperação de senha por e-mail não está disponível neste portal. Procure o administrador para redefinir a sua senha.</div>
+    </div>
+}
+else if (Enviado == 1)
+{
+    @* Mesma mensagem exista ou não o e-mail (o portal nunca revela quem tem conta). *@
+    <div class="alert alert-ok mb-4" role="status">
+        <span class="a-icon" aria-hidden="true">&#9993;&#65039;</span>
+        <div class="a-body">
+            Se o e-mail informado estiver cadastrado, enviamos um link para você criar uma nova senha. O link vale por
+            30 minutos e só pode ser usado uma vez. Não chegou? Confira a caixa de spam ou peça de novo.
+        </div>
+    </div>
+}
+else
+{
+    <p class="auth__subtitle">Informe o e-mail com que você entra no portal. Vamos enviar um link para criar uma nova senha.</p>
+    <form method="post" action="/conta/solicitar-recuperacao">
+        <AntiforgeryToken />
+        <div class="field">
+            <label for="email">E-mail</label>
+            <input class="input" id="email" name="email" type="email" maxlength="256" autocomplete="username" autofocus required />
+        </div>
+        <button class="btn btn-primary w-full" type="submit">Enviar link</button>
+    </form>
+}
+
+<p class="text-sm mt-4"><a href="/conta/entrar">Voltar para o login</a></p>
+
+@code {
+    [SupplyParameterFromQuery] public int Enviado { get; set; }
+    [SupplyParameterFromQuery] public int Indisponivel { get; set; }
+}

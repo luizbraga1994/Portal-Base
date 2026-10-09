@@ -1,0 +1,11 @@
+# .trivyignore — supressões do Trivy (Prompt 52, Fase 19).
+#
+# VAZIO por decisão: nenhuma vulnerabilidade é suprimida atualmente. NUNCA use este arquivo (nem um
+# baseline) para ESCONDER um segredo real ou uma vulnerabilidade explorável (Fase 10/19).
+#
+# Cada supressão futura DEVE ser específica (um CVE por linha) e ter uma entrada correspondente no
+# registro de exceções (docs/SECURITY-CI.md → "Registro de exceções") com: identificador, justificativa,
+# responsável, data, validade e referência técnica. Preferir corrigir a suprimir.
+#
+# Formato (exemplo, comentado):
+# CVE-0000-00000   # justificativa; responsável; validade AAAA-MM-DD; ref: <link> — ver SECURITY-CI.md

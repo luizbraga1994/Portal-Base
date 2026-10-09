@@ -1,0 +1,25 @@
+@* Cabeçalho de página: eyebrow + título + subtítulo + ações. *@
+<div class="page-head">
+    <div class="ph-main">
+        @if (!string.IsNullOrEmpty(Eyebrow))
+        {
+            <div class="eyebrow">@Eyebrow</div>
+        }
+        <h1>@Titulo</h1>
+        @if (!string.IsNullOrEmpty(Subtitulo))
+        {
+            <p class="ph-sub">@Subtitulo</p>
+        }
+    </div>
+    @if (Acoes is not null)
+    {
+        <div class="ph-actions">@Acoes</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Eyebrow { get; set; }
+    [Parameter] public string Titulo { get; set; } = string.Empty;
+    [Parameter] public string? Subtitulo { get; set; }
+    [Parameter] public RenderFragment? Acoes { get; set; }
+}

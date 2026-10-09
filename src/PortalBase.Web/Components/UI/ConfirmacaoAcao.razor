@@ -1,0 +1,122 @@
+@* Modal de confirmação reutilizável (§36) para ações que alteram estado via command existente.
+   A ação real é executada pelo callback OnConfirmar (nunca altera entidade no frontend). *@
+@if (Visivel)
+{
+    @* Escape cancela; foco inicial vai ao botão de confirmação; Tab/Shift+Tab presos ao modal e foco
+       restaurado ao gatilho ao fechar (focus trap — Prompt 74, §7). aria-labelledby com id ÚNICO por instância. *@
+    <div class="overlay" @onclick="Cancelar" @onkeydown="AoTeclar" tabindex="-1">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="@_idTitulo" @onclick:stopPropagation="true" @ref="_containerModal">
+            <div class="modal-head"><h3 id="@_idTitulo">@Titulo</h3></div>
+            <div class="modal-body">
+                <p>@Mensagem</p>
+                @if (Detalhes is not null)
+                {
+                    <div class="mt-3">@Detalhes</div>
+                }
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-ghost" @onclick="Cancelar" disabled="@Processando">Cancelar</button>
+                <button class="btn @(Perigoso ? "btn-danger" : "btn-primary")" @onclick="Confirmar" disabled="@Processando" @ref="_botaoConfirmar">
+                    @if (Processando)
+                    {
+                        <span class="spin on-dark" aria-hidden="true"></span>
+                    }
+                    @TextoConfirmar
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference _botaoConfirmar;
+    private ElementReference _containerModal;
+    // Chave ÚNICA por instância (nunca um id fixo hardcoded) — suporta múltiplos modais e reaberturas.
+    private readonly string _chaveTrap = "cfa-" + Guid.NewGuid().ToString("N");
+    private string _idTitulo => _chaveTrap + "-titulo";
+    private bool _ativarAoRenderizar;
+    private bool _desativarAoRenderizar;
+    private bool _eraVisivel;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    [Parameter] public bool Visivel { get; set; }
+
+    [Parameter] public string Titulo { get; set; } = "Confirmar operação";
+
+    [Parameter] public string Mensagem { get; set; } = string.Empty;
+
+    [Parameter] public string TextoConfirmar { get; set; } = "Confirmar";
+
+    /// <summary>Operação de alto impacto/irreversível (botão destaque).</summary>
+    [Parameter] public bool Perigoso { get; set; }
+
+    /// <summary>Bloqueia os botões enquanto o command é executado (evita double-submit — §38).</summary>
+    [Parameter] public bool Processando { get; set; }
+
+    /// <summary>Bloco opcional com o impacto/detalhe da ação (registro afetado, etc.).</summary>
+    [Parameter] public RenderFragment? Detalhes { get; set; }
+
+    [Parameter] public EventCallback OnConfirmar { get; set; }
+
+    [Parameter] public EventCallback OnCancelar { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Detecta as transições para ativar/desativar o focus trap na renderização seguinte.
+        if (Visivel && !_eraVisivel)
+        {
+            _ativarAoRenderizar = true; // oculto → visível: prende o foco e leva ao botão de confirmação.
+        }
+        else if (!Visivel && _eraVisivel)
+        {
+            _desativarAoRenderizar = true; // visível → oculto (cancelar/sucesso/erro): solta e restaura o foco.
+        }
+        _eraVisivel = Visivel;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool primeiroRender)
+    {
+        if (_ativarAoRenderizar)
+        {
+            _ativarAoRenderizar = false;
+            // activate registra o gatilho (foco anterior), leva o foco ao botão de confirmação e prende Tab ao modal.
+            try { await JS.InvokeVoidAsync("portalBase.focusTrap.activate", _containerModal, _botaoConfirmar, _chaveTrap); }
+            catch (JSException) { /* interop indisponível — a ação nunca deve quebrar por a11y (best-effort). */ }
+            catch (InvalidOperationException) { /* pré-render/desconectado — ignora. */ }
+        }
+
+        if (_desativarAoRenderizar)
+        {
+            _desativarAoRenderizar = false;
+            // deactivate solta a armadilha e RESTAURA o foco ao elemento que abriu o modal.
+            try { await JS.InvokeVoidAsync("portalBase.focusTrap.deactivate", _chaveTrap); }
+            catch (JSException) { /* best-effort */ }
+            catch (InvalidOperationException) { /* pré-render/desconectado — ignora. */ }
+        }
+    }
+
+    private async Task AoTeclar(KeyboardEventArgs e)
+    {
+        if (e.Key is "Escape" or "Esc")
+        {
+            await Cancelar();
+        }
+    }
+
+    private async Task Confirmar()
+    {
+        if (!Processando)
+        {
+            await OnConfirmar.InvokeAsync();
+        }
+    }
+
+    private async Task Cancelar()
+    {
+        if (!Processando)
+        {
+            await OnCancelar.InvokeAsync();
+        }
+    }
+}

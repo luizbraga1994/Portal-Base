@@ -1,0 +1,93 @@
+# EditorConfig — estilo e severidades de analisadores alinhados às
+# REGRAS TRANSVERSAIS OBRIGATÓRIAS (ver docs/REGRAS-TRANSVERSAIS-OBRIGATORIAS.md).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# O Windows PowerShell 5.1 lê .ps1 SEM BOM como ANSI (1252), não UTF-8 — acentos e travessões quebram o parse.
+[*.ps1]
+charset = utf-8-bom
+
+[*.{cs,csx}]
+indent_size = 4
+max_line_length = 120
+
+# ---------------------------------------------------------------------------
+# Regras de segurança promovidas a ERRO (falham o build).
+# ---------------------------------------------------------------------------
+
+# Regra 13 — revisar consultas SQL: nunca concatenar entrada em SQL.
+dotnet_diagnostic.CA2100.severity = error
+
+# Regra 2/10 — validar argumentos de métodos públicos (fronteiras não confiáveis).
+dotnet_diagnostic.CA1062.severity = warning
+
+# Regra 7/8/16 — não expor/registrar segredos e informação sensível:
+#   CA5359 não desabilitar validação de certificado
+#   CA5386/CA5387/CA5397 TLS/criptografia fraca
+#   CA2109 não expor membros de tratamento de evento
+dotnet_diagnostic.CA5359.severity = error
+dotnet_diagnostic.CA3075.severity = error   # XmlDocument/XXE
+dotnet_diagnostic.CA5350.severity = warning # algoritmos criptográficos fracos
+dotnet_diagnostic.CA5351.severity = error   # algoritmos criptográficos quebrados
+
+# Regra 11 — respeitar CancellationToken em operações assíncronas.
+dotnet_diagnostic.CA2016.severity = error   # encaminhar CancellationToken
+
+# Regra 1 — não engolir exceções silenciosamente / não capturar Exception genérica sem tratar.
+dotnet_diagnostic.CA1031.severity = suggestion
+
+# CA1716: nomes de namespace que colidem com palavras reservadas de VB (ex.: "Shared").
+# Solução é C#-only e os nomes de projeto/namespace são fixados pela arquitetura
+# obrigatória (PortalBase.Shared). Compatibilidade cross-language com VB não se aplica.
+dotnet_diagnostic.CA1716.severity = none
+
+# ---------------------------------------------------------------------------
+# Estilo de código: mantido como sugestão para não transformar formatação
+# em erro de build (a segurança é o que falha o build, não a estética).
+# Rode `dotnet format` para aplicar o estilo.
+# ---------------------------------------------------------------------------
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace:suggestion
+csharp_style_namespace_declarations = file_scoped:suggestion
+dotnet_style_prefer_conditional_expression_over_return = true:suggestion
+csharp_prefer_braces = true:suggestion
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_readonly_field = true:suggestion
+
+# Nomeação: constantes e membros públicos em PascalCase (informativo).
+dotnet_naming_rule.constants_pascal.severity = suggestion
+
+# ---------------------------------------------------------------------------
+# Projetos de teste: relaxar validação de argumentos públicos (não é fronteira).
+# ---------------------------------------------------------------------------
+[tests/**/*.cs]
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1707.severity = none   # nomes de teste com sublinhado
+dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait desnecessário em testes
+dotnet_diagnostic.CA1515.severity = none   # tipos públicos em projeto de teste
+dotnet_diagnostic.CA2100.severity = none   # DDL de teste com identificadores controlados
+dotnet_diagnostic.CA5394.severity = none   # Random em geração de dados de teste (não-segurança)
+
+# ---------------------------------------------------------------------------
+# Migrations do EF Core são código GERADO: não aplicar estilo/analisadores.
+# ---------------------------------------------------------------------------
+[**/Migrations/*.cs]
+generated_code = true
+
+# ---------------------------------------------------------------------------
+# Hosts (Web/Worker): Program.cs de bootstrap pode usar Console no
+# Serilog bootstrap logger; CA1515 (tornar tipos internos) não se aplica a hosts.
+# ---------------------------------------------------------------------------
+[src/PortalBase.Web/**.cs]
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait desnecessário em código de host
+
+[src/PortalBase.Worker/**.cs]
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait desnecessário em código de host

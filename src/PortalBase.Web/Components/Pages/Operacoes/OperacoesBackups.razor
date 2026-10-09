@@ -1,0 +1,326 @@
+@page "/operacoes/backups"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosBackups Dados
+@inject IAutorizacaoVisual Visual
+@inject NavigationManager Nav
+
+<PageTitle>Backups · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Operações" Titulo="Backups e restauração"
+            Subtitulo="Cópias do catálogo e de cada contribuinte: fazer agora, testar e restaurar. Só o Administrador da plataforma; tudo autorizado e auditado no servidor. Só metadados na tela — nada de local físico, base ou chave.">
+    <Acoes><button id="btn-atualizar-backups" class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.BackupExecutar))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Backup e restauração são da plataforma (plataforma.backup.executar).">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else if (_carregando && _itens.Count == 0)
+{
+    <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando backups…</p></div>
+}
+else if (_estado != EstadoConsultaUi.Ok)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou ou não foi autorizada.</p></div></div>
+}
+else
+{
+    <div class="grid grid-2 gap-4 mb-4">
+        <div class="card card-pad" id="situacao-backup">
+            <h3 class="card-title">Situação</h3>
+            @if (_situacao is { } s)
+            {
+                <ul class="stack gap-2 mt-3 text-sm">
+                    <li>@(s.ExecutorDisponivel ? "✅" : "⚠️") <strong>Executor de backup (mysqldump/mysql):</strong> @(s.ExecutorDisponivel ? "disponível" : "indisponível — nada pode ser copiado nem restaurado neste ambiente")</li>
+                    <li>@(s.CifraOk ? "✅" : "⚠️") <strong>Cifra dos arquivos:</strong> @s.CifraRotulo</li>
+                    <li>@(s.AgendamentoHabilitado ? "✅" : "⚠️") <strong>Backup agendado:</strong> @s.AgendamentoRotulo</li>
+                    <li>@(s.OffsiteConfigurado ? "✅" : "⚠️") <strong>Cópia externa (offsite):</strong> @(s.OffsiteConfigurado ? "configurada — cada cópia é conferida pelo hash (coluna Cópia externa)" : "não configurada — se o disco do servidor se perder, os backups se perdem junto")</li>
+                </ul>
+            }
+            else
+            {
+                <p class="text-sm text-muted mt-3">Situação indisponível.</p>
+            }
+        </div>
+
+        <div class="card card-pad" id="backup-agora">
+            <h3 class="card-title">Fazer backup agora</h3>
+            <p class="text-sm text-muted mt-2 mtx-075">A cópia é cifrada, conferida (hash) e registrada; a lista abaixo mostra o resultado.</p>
+            <div class="grid grid-2 gap-3 mt-3">
+                <div class="field"><label for="backup-alvo">O que copiar</label>
+                    <select id="backup-alvo" class="input" @bind="_alvo" disabled="@_executando">
+                        <option value="todos">Todos os contribuintes</option>
+                        <option value="catalogo">Catálogo da plataforma</option>
+                        @foreach (var c in _contribuintes)
+                        {
+                            <option value="@c.Id">@c.Nome</option>
+                        }
+                    </select></div>
+                <div class="field"><label for="backup-retencao">Guardar por</label>
+                    <select id="backup-retencao" class="input" @bind="_periodicidade" disabled="@_executando">
+                        <option value="Diario">@($"Diário ({_situacao?.RetencaoDiariaDias ?? 7} dias)")</option>
+                        <option value="Semanal">@($"Semanal ({_situacao?.RetencaoSemanalDias ?? 35} dias)")</option>
+                        <option value="Mensal">@($"Mensal ({_situacao?.RetencaoMensalDias ?? 365} dias)")</option>
+                    </select></div>
+            </div>
+            <button id="btn-fazer-backup" class="btn btn-primary" @onclick="() => _confirmarBackup = true" disabled="@(_executando || _situacao is not { ExecutorDisponivel: true })">
+                Fazer backup
+            </button>
+            @if (_resultadoBackup is { } rb)
+            {
+                <AlertaResultado Id="resultado-backup" R="rb" />
+            }
+        </div>
+    </div>
+
+    @if (_selecionado is { } sel)
+    {
+        <div class="card card-pad mb-4 bl-warn" id="restauracao-contribuinte">
+            <h3 class="card-title">Restaurar @sel.Alvo</h3>
+            <p class="text-sm mt-2">Volta os dados de <strong>@sel.Alvo</strong> para o backup de <span class="mono">@Data(sel.IniciadoEmUtc)</span> (UTC).</p>
+            <ul class="text-sm mt-2 stack gap-1">
+                <li>⚠️ Tudo o que foi gravado <strong>depois</strong> desse backup deixa de valer no portal. A base atual não é apagada: fica guardada à parte e a equipe técnica pode recuperá-la.</li>
+                <li>⚠️ O contribuinte fica <strong>indisponível</strong> durante a restauração (de segundos a alguns minutos) e volta sozinho.</li>
+                <li>ℹ️ O backup é conferido (hash e dono da base) antes; se algo falhar, os dados em uso não mudam.</li>
+            </ul>
+            <div class="field mt-3"><label for="restaurar-justificativa">Justificativa (obrigatória — fica na auditoria)</label>
+                <textarea id="restaurar-justificativa" class="input" rows="2" maxlength="400" @bind="_justificativa" @bind:event="oninput" disabled="@_executando"></textarea></div>
+            <div class="field"><label for="restaurar-confirmacao">Para confirmar, digite o nome do contribuinte: <strong>@sel.Alvo</strong></label>
+                <input id="restaurar-confirmacao" class="input mw-320" autocomplete="off" @bind="_confirmacao" @bind:event="oninput" disabled="@_executando" /></div>
+            <div class="row gap-2">
+                <button id="btn-restaurar-contribuinte" class="btn btn-danger" @onclick="() => _confirmarRestauracao = true"
+                        disabled="@(_executando || !PodeConfirmarRestauracao)">Restaurar contribuinte</button>
+                <button class="btn btn-ghost" @onclick="CancelarRestauracao" disabled="@_executando">Cancelar</button>
+            </div>
+        </div>
+    }
+
+    @if (_resultadoAcao is { } ra)
+    {
+        <AlertaResultado Id="resultado-restauracao" R="ra" />
+    }
+
+    @if (_itens.Count == 0)
+    {
+        <div class="card card-pad" id="backups-vazio">
+            <div class="fw-700">Nenhum backup registrado</div>
+            <p class="text-sm text-muted mtx-04">
+                Use <strong>Fazer backup</strong> acima, ou ligue o backup agendado no servidor de processamento
+                (<span class="mono">Backup:AgendamentoHabilitado</span>). Acompanhe o trabalhador <span class="mono">backup-agendado</span>
+                em Operações → Workers.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="dt-wrap" id="tabela-backups">
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th>Alvo</th><th>Situação</th><th>Início</th><th>Fim</th><th class="tnum">Tamanho</th><th>Cifrado</th><th title="Cópia em outro disco ou servidor, conferida pelo hash">Cópia externa</th><th>Retido até</th><th title="Restauração testada">Testado</th><th>Erro</th>@if (_podeRestaurar) { <th>Ações</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var b in _itens)
+                        {
+                            <tr>
+                                <td><span class="fw-700">@b.Alvo</span>
+                                    @if (b.Hash is { Length: >= 12 } h)
+                                    {
+                                        <div class="text-xs text-muted mono" title="SHA-256 do artefato: @h (o comando decifrar-backup mostra o mesmo valor)">#@h[..12]…</div>
+                                    }
+                                </td>
+                                <td><StatusBadge Texto="@b.SituacaoRotulo" Situacao="@b.SituacaoBadge" /></td>
+                                <td class="text-sm mono">@Data(b.IniciadoEmUtc)</td>
+                                <td class="text-sm mono">@Data(b.ConcluidoEmUtc)</td>
+                                <td class="tnum">@b.Tamanho</td>
+                                <td>@(b.Criptografado ? "Sim" : "Não")</td>
+                                <td class="text-sm">@b.CopiaExterna</td>
+                                <td class="text-sm mono">@Data(b.RetencaoAteUtc)</td>
+                                <td>@(b.RestoreTestado ? "Sim" : "Não")</td>
+                                <td class="text-sm quebra-livre">@(b.Erro is { Length: > 0 } e ? e : "—")</td>
+                                @if (_podeRestaurar)
+                                {
+                                    <td class="text-sm">
+                                        @* Empilhados: lado a lado, a coluna empurrava a tabela para fora da tela em 1440 px. *@
+                                        <div class="stack gap-1">
+                                            @if (b.PodeTestar)
+                                            {
+                                                <button class="btn btn-ghost btn-sm btn-testar-restauracao" data-backup="@b.Id" @onclick="() => _testar = b" disabled="@_executando"
+                                                        title="Testar a restauração (numa base temporária, apagada no fim)" aria-label="Testar a restauração do backup de @b.Alvo">Testar</button>
+                                            }
+                                            @if (b.PodeRestaurar)
+                                            {
+                                                <button class="btn btn-ghost btn-sm btn-restaurar" data-backup="@b.Id" @onclick="() => Selecionar(b)" disabled="@_executando"
+                                                        title="Restaurar o contribuinte para este backup" aria-label="Restaurar @b.Alvo para este backup">Restaurar</button>
+                                            }
+                                        </div>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <p class="text-sm text-muted mt-3">Horários em UTC. O catálogo da plataforma só é <strong>testado</strong> por aqui: restaurá-lo é um procedimento da equipe técnica, com o portal parado.</p>
+    }
+}
+
+<ConfirmacaoAcao Visivel="_confirmarBackup" Titulo="Fazer backup agora?" TextoConfirmar="Fazer backup" Processando="_executando"
+                 Mensagem="@($"Copiar {RotuloAlvo} agora. A cópia pode levar alguns minutos; não feche a página.")"
+                 OnConfirmar="FazerBackupAsync" OnCancelar="() => _confirmarBackup = false" />
+
+<ConfirmacaoAcao Visivel="@(_testar is not null)" Titulo="Testar a restauração deste backup?" TextoConfirmar="Testar" Processando="_executando"
+                 Mensagem="O backup é restaurado numa base temporária, conferido e a base temporária é apagada. Os dados em uso não são tocados."
+                 OnConfirmar="TestarAsync" OnCancelar="() => _testar = null" />
+
+<ConfirmacaoAcao Visivel="_confirmarRestauracao" Titulo="Restaurar o contribuinte?" TextoConfirmar="Restaurar" Perigoso="true" Processando="_executando"
+                 Mensagem="@($"Os dados de {_selecionado?.Alvo} voltam ao backup de {Data(_selecionado?.IniciadoEmUtc)} (UTC). O contribuinte fica indisponível durante a operação e a base atual é guardada à parte.")"
+                 OnConfirmar="RestaurarAsync" OnCancelar="() => _confirmarRestauracao = false" />
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Operações", "/operacoes/saude"), new Migalha("Backups")];
+
+    private bool _carregando = true;
+    private bool _executando;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemPermissao;
+    private IReadOnlyList<BackupVm> _itens = [];
+    private SituacaoBackupVm? _situacao;
+    private IReadOnlyList<OpcaoContribuinteVm> _contribuintes = [];
+    private bool _podeRestaurar;
+
+    private string _alvo = "todos";
+    private string _periodicidade = "Diario";
+    private bool _confirmarBackup;
+    private ResultadoAcaoVm? _resultadoBackup;
+
+    private BackupVm? _testar;
+    private BackupVm? _selecionado;
+    private string _justificativa = string.Empty;
+    private string _confirmacao = string.Empty;
+    private bool _confirmarRestauracao;
+    private ResultadoAcaoVm? _resultadoAcao;
+
+    private static string Data(DateTimeOffset? d) => d is { } v ? v.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) : "—";
+
+    private string RotuloAlvo => _alvo switch
+    {
+        "todos" => "todos os contribuintes",
+        "catalogo" => "o catálogo da plataforma",
+        _ => _contribuintes.FirstOrDefault(c => c.Id.ToString() == _alvo)?.Nome ?? "o contribuinte escolhido",
+    };
+
+    private bool PodeConfirmarRestauracao => _selecionado is not null
+        && _justificativa.Trim().Length >= 10
+        && string.Equals(_confirmacao.Trim(), _selecionado.Alvo, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _podeRestaurar = Visual.Pode(Permissoes.RestauracaoExecutar);
+        if (Visual.Pode(Permissoes.BackupExecutar))
+        {
+            _contribuintes = await Dados.ListarContribuintesAsync();
+            await Carregar();
+        }
+        else
+        {
+            _carregando = false;
+        }
+    }
+
+    private async Task Carregar()
+    {
+        _carregando = true;
+        try
+        {
+            (_itens, _estado) = await Dados.ListarRecentesAsync();
+            (_situacao, _) = await Dados.ObterSituacaoAsync();
+        }
+        finally { _carregando = false; }
+    }
+
+    private void Selecionar(BackupVm b)
+    {
+        _selecionado = b;
+        _justificativa = string.Empty;
+        _confirmacao = string.Empty;
+        _resultadoAcao = null;
+    }
+
+    private void CancelarRestauracao()
+    {
+        _selecionado = null;
+        _justificativa = string.Empty;
+        _confirmacao = string.Empty;
+    }
+
+    private async Task FazerBackupAsync()
+    {
+        if (_executando) { return; }
+        _executando = true;
+        try
+        {
+            _resultadoBackup = await Dados.FazerBackupAsync(_alvo, _periodicidade);
+        }
+        finally
+        {
+            _executando = false;
+            _confirmarBackup = false;
+        }
+
+        await PosAcaoAsync(_resultadoBackup);
+    }
+
+    private async Task TestarAsync()
+    {
+        if (_executando || _testar is null) { return; }
+        _executando = true;
+        try
+        {
+            _resultadoAcao = await Dados.TestarRestauracaoAsync(_testar.Id);
+        }
+        finally
+        {
+            _executando = false;
+            _testar = null;
+        }
+
+        await PosAcaoAsync(_resultadoAcao);
+    }
+
+    private async Task RestaurarAsync()
+    {
+        if (_executando || _selecionado is not { TenantId: Guid tenantId } sel) { return; }
+        _executando = true;
+        try
+        {
+            _resultadoAcao = await Dados.RestaurarContribuinteAsync(sel.Id, tenantId, _justificativa, _confirmacao);
+        }
+        finally
+        {
+            _executando = false;
+            _confirmarRestauracao = false;
+        }
+
+        if (_resultadoAcao.Sucesso)
+        {
+            CancelarRestauracao();
+        }
+
+        await PosAcaoAsync(_resultadoAcao);
+    }
+
+    private async Task PosAcaoAsync(ResultadoAcaoVm resultado)
+    {
+        if (resultado.Estado == EstadoAcaoUi.MfaRequerida)
+        {
+            Nav.NavigateTo(MapeadorAcaoAdmin.CaminhoStepUpMfa(Nav.Uri), forceLoad: true);
+            return;
+        }
+
+        (_itens, _estado) = await Dados.ListarRecentesAsync();
+    }
+}

@@ -1,0 +1,35 @@
+@* Paginação reutilizável (§28) — server-side; respeita os limites do backend (1..200, padrão 50). *@
+@if (Total > 0)
+{
+    <div class="dt-foot">
+        <span>@Inicio&ndash;@Fim de @Total.ToString("N0", Cultura) @Rotulo · página @Pagina de @TotalPaginas</span>
+        <div class="pager">
+            <button @onclick="OnAnterior" disabled="@(Pagina <= 1)" aria-label="Página anterior">&lsaquo; Anterior</button>
+            <button class="active" aria-current="page">@Pagina</button>
+            <button @onclick="OnProxima" disabled="@(Pagina >= TotalPaginas)" aria-label="Próxima página">Próxima &rsaquo;</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Pagina { get; set; } = 1;
+
+    [Parameter] public int TamanhoPagina { get; set; } = 50;
+
+    [Parameter] public long Total { get; set; }
+
+    /// <summary>Rótulo do item (ex.: "arquivos"). Aparece após a contagem.</summary>
+    [Parameter] public string Rotulo { get; set; } = "registros";
+
+    [Parameter] public EventCallback OnAnterior { get; set; }
+
+    [Parameter] public EventCallback OnProxima { get; set; }
+
+    private static readonly CultureInfo Cultura = CultureInfo.GetCultureInfo("pt-BR");
+
+    private int TotalPaginas => TamanhoPagina < 1 ? 1 : (int)Math.Max(1, Math.Ceiling(Total / (double)TamanhoPagina));
+
+    private long Inicio => Total == 0 ? 0 : ((long)(Pagina - 1) * TamanhoPagina) + 1;
+
+    private long Fim => Math.Min((long)Pagina * TamanhoPagina, Total);
+}

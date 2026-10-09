@@ -1,0 +1,174 @@
+@page "/admin/perfis"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Identidade
+@inject IAutorizacaoVisual Visual
+@inject IDadosPerfis Dados
+@inject ServicoNotificacoes Notificacoes
+
+<PageTitle>Perfis · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Administração" Titulo="Perfis"
+            Subtitulo="Um perfil é um pacote de permissões dado a um usuário neste contribuinte. Os do sistema servem a todos os contribuintes; crie perfis personalizados com exatamente as permissões que precisar.">
+    <Acoes>
+        <a class="btn btn-secondary btn-sm" href="/admin/permissoes">Ver permissões →</a>
+        @if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            <a class="btn btn-primary btn-sm" id="btn-novo-perfil" href="/admin/perfis/novo">+ Novo perfil</a>
+        }
+    </Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.AdminUsuarios))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Ver os perfis exige a permissão de administração de usuários (admin.usuarios). A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/admin">Voltar à administração</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="card"><div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando perfis…</p></div></div>
+}
+else if (_estado != EstadoConsultaUi.Ok)
+{
+    <div class="card"><EmptyState Emoji="&#127970;" Titulo="@(_estado == EstadoConsultaUi.SemTenant ? "Selecione um contribuinte" : "Não foi possível carregar")"
+        Mensagem="Os perfis são consultados no contexto de um contribuinte autorizado." /></div>
+}
+else
+{
+    <div class="card card-pad mb-4 perfil-card perfil-card--plataforma" id="perfil-administrador-plataforma">
+        <div class="row gap-3 ai-center jc-between">
+            <div>
+                <div class="fw-700">&#128081; Administrador da plataforma</div>
+                <div class="text-sm text-muted">Perfil global · vale para todos os contribuintes</div>
+            </div>
+            <StatusBadge Texto="@($"{_totalPermissoes} permissões · sem MFA")" Situacao="primary" />
+        </div>
+        <p class="text-sm text-muted m-050075">
+            Acesso total: todas as permissões de todos os contribuintes e todas as da plataforma (backup e restauração, catálogo oficial,
+            incidentes, criação de contribuintes, logo global), sem pedir o segundo fator. É concedido a uma pessoa na tela
+            <a href="/admin/usuarios">Usuários</a> → Editar, por outro Administrador da plataforma.
+        </p>
+    </div>
+
+    <h3 class="h-95 mb-3">Perfis do sistema</h3>
+    <div class="grid grid-2 gap-4 mb-4">
+        @foreach (var perfil in _perfis.Where(p => p.DoSistema))
+        {
+            <div class="card card-pad perfil-card" data-perfil="@perfil.Nome">
+                <div class="row gap-3 ai-center jc-between">
+                    <div>
+                        <div class="fw-700">@perfil.Nome</div>
+                        <div class="text-sm text-muted">@perfil.Usuarios usuário(s) neste contribuinte</div>
+                    </div>
+                    <StatusBadge Texto="@($"{perfil.Permissoes.Count} permissões")" Situacao="neutral" />
+                </div>
+                <p class="text-sm text-muted m-050075">@DescricaoSistema(perfil)</p>
+                <div class="row wrap gap-2">
+                    @foreach (var chave in perfil.Permissoes)
+                    {
+                        <span class="chip mono text-sm pill-linha">@chave</span>
+                    }
+                </div>
+                <div class="row gap-2 mt-3">
+                    <a class="btn btn-secondary btn-sm" href="@($"/admin/perfis/novo?copiar={perfil.Id}")">Duplicar como personalizado</a>
+                </div>
+            </div>
+        }
+    </div>
+
+    <h3 class="h-95 mb-3">Perfis personalizados deste contribuinte</h3>
+    @if (!_perfis.Any(p => !p.DoSistema))
+    {
+        <div class="card"><EmptyState Emoji="&#127917;" Titulo="Nenhum perfil personalizado"
+            Mensagem="Crie um perfil com as permissões exatas de um cargo (ex.: Contador, Auditor externo)." >
+            <Acao><a class="btn btn-primary" href="/admin/perfis/novo">+ Novo perfil</a></Acao></EmptyState></div>
+    }
+    else
+    {
+        <div class="grid grid-2 gap-4">
+            @foreach (var perfil in _perfis.Where(p => !p.DoSistema))
+            {
+                <div class="card card-pad perfil-card" data-perfil="@perfil.Nome">
+                    <div class="row gap-3 ai-center jc-between">
+                        <div>
+                            <div class="fw-700">@perfil.Nome</div>
+                            <div class="text-sm text-muted">@perfil.Usuarios usuário(s) neste contribuinte</div>
+                        </div>
+                        <StatusBadge Texto="@($"{perfil.Permissoes.Count} permissões")" Situacao="primary" />
+                    </div>
+                    <p class="text-sm text-muted m-050075">@perfil.Descricao</p>
+                    <div class="row wrap gap-2">
+                        @foreach (var chave in perfil.Permissoes)
+                        {
+                            <span class="chip mono text-sm pill-linha">@chave</span>
+                        }
+                    </div>
+                    <div class="row gap-2 mt-3">
+                        <a class="btn btn-secondary btn-sm" href="@($"/admin/perfis/{perfil.Id}")">Editar</a>
+                        <button class="btn btn-ghost btn-sm" @onclick="() => _excluir = perfil" disabled="@_executando">Excluir</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <ConfirmacaoAcao Visivel="_excluir is not null" Perigoso="true" Processando="_executando"
+                     Titulo="Excluir o perfil?"
+                     Mensagem="@($"O perfil '{_excluir?.Nome}' será excluído. Só é possível se nenhum usuário o tiver. A operação é auditada.")"
+                     TextoConfirmar="Excluir"
+                     OnConfirmar="Excluir" OnCancelar="() => _excluir = null" />
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas =
+        [new Migalha("Administração", "/admin"), new Migalha("Perfis")];
+
+    private static readonly int _totalPermissoes = CatalogoPermissoesUi.TodasAsChaves.Count;
+
+    private bool _carregando = true;
+    private bool _executando;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemTenant;
+    private IReadOnlyList<PerfilGestao> _perfis = [];
+    private PerfilGestao? _excluir;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.AdminUsuarios))
+        {
+            (_perfis, _estado) = await Dados.ListarAsync();
+        }
+
+        _carregando = false;
+    }
+
+    private static string DescricaoSistema(PerfilGestao perfil)
+        => CatalogoPapeisUi.Papeis.FirstOrDefault(p => p.Papel == perfil.Nome)?.Descricao ?? perfil.Descricao;
+
+    private async Task Excluir()
+    {
+        if (_excluir is null || _executando)
+        {
+            return;
+        }
+
+        _executando = true;
+        ResultadoAcaoVm resultado;
+        try
+        {
+            resultado = await Dados.ExcluirAsync(_excluir.Id);
+        }
+        finally
+        {
+            _executando = false;
+            _excluir = null;
+        }
+
+        MapeadorAcaoAdmin.Notificar(Notificacoes, resultado);
+        if (resultado.Sucesso)
+        {
+            (_perfis, _estado) = await Dados.ListarAsync();
+        }
+    }
+}

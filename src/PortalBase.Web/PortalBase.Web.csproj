@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    WEB (Blazor Server): HOST de apresentação. Faz a composição da DI (Application
+    + Infrastructure). Não contém regra de negócio nem acesso direto
+    a banco a partir de componentes.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <UserSecretsId>portalbase-web</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PortalBase.Application\PortalBase.Application.csproj" />
+    <ProjectReference Include="..\PortalBase.Infrastructure\PortalBase.Infrastructure.csproj" />
+    <ProjectReference Include="..\PortalBase.Shared\PortalBase.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Prova por teste (Onda 5): regras puras dos endpoints (ex.: 304 da logo sem ler a imagem — UI-005) e do executor
+         de tarefas em segundo plano (ARQ-006) são verificadas sem subir o host inteiro. -->
+    <InternalsVisibleTo Include="PortalBase.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
+</Project>

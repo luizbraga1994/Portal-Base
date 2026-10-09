@@ -1,0 +1,125 @@
+@page "/"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosArquivos Dados
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Dashboard · Portal Base</PageTitle>
+
+<PageHeader Eyebrow="Portal Base" Titulo="Dashboard"
+            Subtitulo="Visão do contribuinte selecionado. Indicadores derivados dos read-models reais — sem números fictícios.">
+    <Acoes>
+        <button class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button>
+    </Acoes>
+</PageHeader>
+
+@* Painel inicial do template: troque os indicadores pelos do domínio do seu portal (sempre de read-models autorizados). *@
+@if (!Visual.Pode(Permissoes.DadosVisualizar))
+{
+    <div class="card">
+        <EmptyState Emoji="&#128075;" Titulo="Bem-vindo ao Portal Base"
+                    Mensagem="Seu perfil não tem a permissão de visualização de dados (dados.visualizar). Fale com o administrador do contribuinte." />
+    </div>
+}
+else if (_carregando && _arquivos is null)
+{
+    <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Carregando indicadores…</p></div>
+}
+else if (_arquivos?.Estado == EstadoConsultaUi.SemTenant)
+{
+    <div class="card">
+        <EmptyState Emoji="&#127970;" Titulo="Selecione um contribuinte"
+                    Mensagem="Os indicadores são apresentados no contexto de um contribuinte autorizado." />
+    </div>
+}
+else if (_arquivos?.Estado == EstadoConsultaUi.SemPermissao)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão" Mensagem="Acesso negado no servidor." /></div>
+}
+else if (_arquivos?.Estado == EstadoConsultaUi.Erro)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji">&#9888;&#65039;</div>
+        <h3>Indicadores indisponíveis</h3><p>Não foi possível consultar os dados. Nenhum detalhe interno é exibido.</p></div></div>
+}
+else if (_arquivos is not null)
+{
+    <div class="grid grid-3 mb-4">
+        <StatCard Rotulo="Arquivos recebidos" Valor="@_arquivos.Total.ToString("N0", Br)" Icone="&#128196;" Acento="true" />
+        <StatCard Rotulo="Rejeitados" Valor="@(_rejeitados?.Total.ToString("N0", Br) ?? "—")" Icone="&#9888;&#65039;" />
+        <StatCard Rotulo="Último envio" Valor="@(_arquivos.Itens.Count > 0 ? _arquivos.Itens[0].EnviadoEmUtc.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture) : "—")" Icone="&#128337;" />
+    </div>
+
+    <div class="card">
+        <div class="card-head"><h3>Arquivos recentes</h3>
+            <a class="ch-sub" href="/dados/arquivos">Ver todos &rsaquo;</a></div>
+        @if (_arquivos.Itens.Count == 0)
+        {
+            <div class="card-pad">
+                <EmptyState Emoji="&#128194;" Titulo="Nenhum arquivo recebido"
+                            Mensagem="Quando houver arquivos no contribuinte, eles aparecem aqui." />
+            </div>
+        }
+        else
+        {
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th>Nome</th><th class="tnum">Tamanho</th><th>Estado</th><th>Scan</th><th>Enviado</th></tr></thead>
+                    <tbody>
+                        @foreach (var a in _arquivos.Itens)
+                        {
+                            <tr>
+                                <td class="fw-700 text-sm">@a.Nome</td>
+                                <td class="tnum">@a.TamanhoLegivel</td>
+                                <td><StatusBadge Texto="@a.Estado" Situacao="@a.EstadoBadge" /></td>
+                                <td><StatusBadge Texto="@a.Scan" Situacao="@a.ScanBadge" /></td>
+                                <td class="text-sm mono">@a.EnviadoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo Br = CultureInfo.GetCultureInfo("pt-BR");
+
+    private bool _carregando = true;
+    private ResultadoListaVm<RegistroArquivoVm>? _arquivos;
+    private ResultadoListaVm<RegistroArquivoVm>? _rejeitados;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.DadosVisualizar))
+        {
+            await Carregar();
+        }
+        else
+        {
+            _carregando = false;
+        }
+    }
+
+    private async Task Carregar()
+    {
+        if (_carregando && _arquivos is not null)
+        {
+            return;
+        }
+
+        _carregando = true;
+        try
+        {
+            // Duas consultas paginadas pequenas (5 itens e 1 item): o total vem do read-model, sem carregar a lista inteira.
+            _arquivos = await Dados.ConsultarAsync(new FiltroArquivosVm { Pagina = 1, TamanhoPagina = 5 });
+            _rejeitados = _arquivos.Estado == EstadoConsultaUi.Ok
+                ? await Dados.ConsultarAsync(new FiltroArquivosVm { Estado = "Rejeitado", Pagina = 1, TamanhoPagina = 1 })
+                : null;
+        }
+        finally
+        {
+            _carregando = false;
+        }
+    }
+}

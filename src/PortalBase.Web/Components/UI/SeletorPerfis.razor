@@ -1,0 +1,54 @@
+@* Escolha de perfis (caixas de seleção) para o cadastro de usuários. Só apresentação: quem decide se o perfil pode ser
+   concedido (contribuinte, anti-escalada, autoconcessão) é o servidor, ao salvar. *@
+@using PortalBase.Application.Identidade
+
+<div class="perfis-lista" role="group" aria-label="Perfis">
+    @foreach (var perfil in Perfis)
+    {
+        var id = $"{Prefixo}-perfil-{perfil.Id:N}";
+        <label class="perfil-opcao" for="@id">
+            <input type="checkbox" id="@id" value="@perfil.Nome" checked="@Selecionados.Contains(perfil.Id)" disabled="@Desabilitado"
+                   @onchange="e => Alternar(perfil.Id, e.Value)" />
+            <span>
+                <span class="fw-700">@perfil.Nome</span>
+                @if (perfil.DoSistema)
+                {
+                    <span class="badge badge-neutral ml-1">sistema</span>
+                }
+                <span class="perfil-opcao__desc">@perfil.Permissoes.Count permissão(ões) · @DescricaoDe(perfil)</span>
+            </span>
+        </label>
+    }
+    @Adicional
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<PerfilGestao> Perfis { get; set; } = [];
+
+    [Parameter] public HashSet<Guid> Selecionados { get; set; } = [];
+
+    [Parameter] public string Prefixo { get; set; } = "perfil";
+
+    [Parameter] public bool Desabilitado { get; set; }
+
+    /// <summary>Cartão extra no fim da lista (ex.: o perfil global "Administrador da plataforma", que tem regra própria).</summary>
+    [Parameter] public RenderFragment? Adicional { get; set; }
+
+    private void Alternar(Guid id, object? valor)
+    {
+        if (valor is true)
+        {
+            Selecionados.Add(id);
+        }
+        else
+        {
+            Selecionados.Remove(id);
+        }
+    }
+
+    // Papéis do sistema: a descrição atualizada da tela (a do catálogo é mais curta).
+    private static string DescricaoDe(PerfilGestao perfil)
+        => perfil.DoSistema
+            ? CatalogoPapeisUi.Papeis.FirstOrDefault(p => p.Papel == perfil.Nome)?.Descricao ?? perfil.Descricao
+            : perfil.Descricao;
+}

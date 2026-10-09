@@ -1,0 +1,169 @@
+@page "/operacoes/saude"
+@rendermode InterativoSemPrerender
+@using PortalBase.Application.Autorizacao
+@inject IDadosOperacoes Dados
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Operações · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Operações" Titulo="Saúde operacional"
+            Subtitulo="Snapshot de observabilidade (read-model ConsultaOperacoes): saúde de workers e integrações. Estado sempre real — ausência de telemetria nunca é exibida como 'saudável'.">
+    <Acoes><button class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.SegurancaIncidentesGerir))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="A visão operacional exige a permissão de plataforma (seguranca.incidentes.gerir). A decisão é do servidor.">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else if (_carregando)
+{
+    <div class="state" role="status"><span class="spin" aria-hidden="true"></span><p class="mt-3">Consultando operações…</p></div>
+}
+else if (_estado == EstadoConsultaUi.SemPermissao)
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão" Mensagem="Acesso negado no servidor." /></div>
+}
+else if (_estado == EstadoConsultaUi.Erro || _painel is null)
+{
+    <div class="card"><div class="state" role="alert"><div class="st-emoji">&#9888;&#65039;</div>
+        <h3>Não foi possível carregar</h3><p>A consulta falhou ou não foi autorizada. Nenhum detalhe interno é exibido.</p></div></div>
+}
+else
+{
+    <div class="grid grid-4 mb-4">
+        <StatCard Rotulo="Workers" Valor="@_painel.Workers.Count.ToString("N0", _cultura)" Icone="&#129302;" Acento="true" />
+        <StatCard Rotulo="Workers estagnados" Valor="@_painel.WorkersEstagnados.ToString("N0", _cultura)" Icone="&#9203;" />
+        <StatCard Rotulo="Integrações" Valor="@_painel.Integracoes.Count.ToString("N0", _cultura)" Icone="&#128268;" />
+        <StatCard Rotulo="Integrações degradadas" Valor="@_painel.IntegracoesDegradadas.ToString("N0", _cultura)" Icone="&#128308;" />
+    </div>
+
+    @if (_painel.ServicoWorker is { Badge: not "ok" and not "neutral" } servico)
+    {
+        <div class="card card-pad mb-4 @(servico.ForaDoAr ? "bl-danger" : "bl-warn")" id="servico-worker" role="alert">
+            <div class="row gap-3 ai-start">
+                <span class="fs-14" aria-hidden="true">&#9888;&#65039;</span>
+                <div>
+                    <div class="row gap-2 ai-center"><span class="fw-700">Serviço do Worker</span>
+                        <StatusBadge Texto="@servico.Rotulo" Situacao="@servico.Badge" /></div>
+                    <p class="text-sm mtx-04">@servico.Mensagem</p>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_painel.WorkersSemTelemetria)
+    {
+        <div class="card card-pad mb-4 bl-warn">
+            <div class="row gap-3 ai-start">
+                <span class="fs-14" aria-hidden="true">&#9888;&#65039;</span>
+                <div>
+                    <div class="fw-700">Nenhum worker registrou saúde ainda</div>
+                    <p class="text-sm text-muted mtx-04">
+                        O host Worker grava a saúde dos trabalhadores no <strong>catálogo</strong> a cada batida. Sem
+                        nenhum registro, o Worker não está rodando (ou não alcança o banco do catálogo). A ausência
+                        de informação <strong>não</strong> significa que os workers estão saudáveis.
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card card-pad mb-4">
+        <div class="row gap-3 ai-center jc-between">
+            <h3 class="card-title">Workers</h3>
+            <a class="btn btn-ghost btn-sm" href="/operacoes/workers">Ver detalhe &rsaquo;</a>
+        </div>
+        @if (_painel.Workers.Count == 0)
+        {
+            <p class="text-muted text-sm mt-3 mtx-075">Nenhum worker registrou saúde ainda.</p>
+        }
+        else
+        {
+            <div class="dt-scroll mt-3">
+                <table class="dt">
+                    <thead><tr><th>Worker</th><th>Estado</th><th class="tnum">Processado</th><th class="tnum">Erros</th><th>Última batida</th></tr></thead>
+                    <tbody>
+                        @foreach (var w in _painel.Workers)
+                        {
+                            <tr>
+                                <td class="fw-700">@w.Worker</td>
+                                <td><StatusBadge Texto="@w.EstadoRotulo" Situacao="@w.EstadoBadge" /></td>
+                                <td class="tnum">@w.TotalProcessado.ToString("N0", _cultura)</td>
+                                <td class="tnum">@w.TotalErros.ToString("N0", _cultura)</td>
+                                <td class="text-sm mono">@(w.UltimaBatidaUtc is { } b ? b.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="card card-pad mb-4">
+        <div class="row gap-3 ai-center jc-between">
+            <h3 class="card-title">Integrações</h3>
+            <a class="btn btn-ghost btn-sm" href="/operacoes/integracoes">Ver detalhe &rsaquo;</a>
+        </div>
+        @if (_painel.Integracoes.Count == 0)
+        {
+            <p class="text-muted text-sm mt-3 mtx-075">Sem telemetria de integrações nesta camada.</p>
+        }
+        else
+        {
+            <div class="dt-scroll mt-3">
+                <table class="dt">
+                    <thead><tr><th>Integração</th><th>Estado</th><th class="tnum">Sucessos</th><th class="tnum">Falhas</th><th>Último sucesso</th></tr></thead>
+                    <tbody>
+                        @foreach (var i in _painel.Integracoes)
+                        {
+                            <tr>
+                                <td class="fw-700">@i.Integracao</td>
+                                <td><StatusBadge Texto="@i.EstadoRotulo" Situacao="@i.EstadoBadge" /></td>
+                                <td class="tnum">@i.TotalSucesso.ToString("N0", _cultura)</td>
+                                <td class="tnum">@i.TotalFalha.ToString("N0", _cultura)</td>
+                                <td class="text-sm mono">@(i.UltimoSucessoUtc is { } s ? s.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture) : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    <div class="card card-pad">
+        <p class="text-sm text-muted m-0">
+            Os incidentes de plataforma estão em <a href="/auditoria/incidentes">Incidentes</a>. Snapshot gerado em
+            <span class="mono">@_painel.GeradoEmUtc.ToString("dd/MM/yyyy HH:mm:ss", CultureInfo.InvariantCulture)</span> (UTC).
+        </p>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Operações", "/operacoes/saude"), new Migalha("Saúde")];
+    private static readonly CultureInfo _cultura = CultureInfo.GetCultureInfo("pt-BR");
+
+    private bool _carregando = true;
+    private EstadoConsultaUi _estado = EstadoConsultaUi.SemPermissao;
+    private PainelOperacoesVm? _painel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Visual.Pode(Permissoes.SegurancaIncidentesGerir)) { await Carregar(); }
+        else { _carregando = false; }
+    }
+
+    private async Task Carregar()
+    {
+        _carregando = true;
+        try
+        {
+            var (painel, estado) = await Dados.ObterPainelAsync();
+            _painel = painel;
+            _estado = estado;
+        }
+        finally { _carregando = false; }
+    }
+}

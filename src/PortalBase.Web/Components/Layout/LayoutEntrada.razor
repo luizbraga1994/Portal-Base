@@ -1,0 +1,104 @@
+@inherits LayoutComponentBase
+@using PortalBase.Application.Marca
+@inject ServicoMarcaPlataforma Marca
+
+@* Layout de ENTRADA (login/MFA) — split-screen profissional. Painel de marca à esquerda
+   (chrome escuro em ambos os temas, igual à topbar) e o formulário à direita. Público:
+   não faz verificação de autenticação (é a porta de entrada) e não entra em laço. A logo é a
+   GLOBAL configurável (fallback resiliente para a marca "D" se ausente/indisponível). *@
+<div class="auth">
+    <aside class="auth__brand" aria-hidden="true">
+        <div class="auth__ident">
+            @if (_temLogo)
+            {
+                <img class="auth__logo-img" src="/branding/logo" alt="Portal Base" />
+            }
+            else
+            {
+                <div class="auth__logo">D</div>
+            }
+            <div>
+                <div class="auth__wordmark">Portal Base</div>
+                <div class="auth__org">Andersen Consulting</div>
+            </div>
+        </div>
+
+        <div class="auth__pitch">
+            <span class="auth__eyebrow">Plataforma multi-tenant</span>
+            @* Não é <h1>: o painel é decorativo (aria-hidden) e o foco da navegação (FocusOnNavigate "h1") tem de ir
+               para o título da própria tela, no cartão. *@
+            @* Uma frase por linha (em tela estreita cada uma quebra sozinha, equilibrada); "multi-contribuinte" nunca
+               parte no hífen. *@
+            <p class="auth__headline">
+                <span class="auth__headline-linha">Gestão <span class="auth__sem-quebra">multi-contribuinte</span>,</span>
+                <span class="auth__headline-linha">com segurança de ponta a ponta.</span>
+            </p>
+            <p class="auth__lead">
+                @* &nbsp; antes do travessão: ele nunca abre uma linha. *@
+                Cada contribuinte no seu próprio ambiente isolado&nbsp;— com autorização decidida no servidor,
+                MFA, cofre de segredos e auditoria.
+            </p>
+
+            <ul class="auth__features">
+                <li class="auth__feature">
+                    <span class="auth__feature-ic" aria-hidden="true">&#128274;</span>
+                    <span>Isolamento de dados por contribuinte (banco por tenant).</span>
+                </li>
+                <li class="auth__feature">
+                    <span class="auth__feature-ic" aria-hidden="true">&#128737;&#65039;</span>
+                    <span>Autorização e MFA validados sempre no servidor.</span>
+                </li>
+                <li class="auth__feature">
+                    <span class="auth__feature-ic" aria-hidden="true">&#128220;</span>
+                    <span>Trilha de auditoria completa em cada operação crítica.</span>
+                </li>
+            </ul>
+        </div>
+
+        <div class="auth__foot">&copy; Andersen Consulting · Portal Base</div>
+    </aside>
+
+    <main class="auth__panel">
+        <div class="auth__card">
+            <div class="auth__card-inner">
+                @* Marca no topo do card, centralizada — a logo GLOBAL configurável (fallback resiliente
+                   para a marca "D" quando ausente/indisponível). Sem fundo branco: a logo é servida sobre
+                   a própria superfície do card (uma logo clara ficaria invisível num quadro branco). *@
+                <div class="auth__card-brand">
+                    @if (_temLogo)
+                    {
+                        <img class="auth__card-logo-img" src="/branding/logo" alt="Portal Base · Andersen Consulting" />
+                    }
+                    else
+                    {
+                        <div class="auth__logo">D</div>
+                        <div class="auth__card-brand-txt">
+                            <span class="auth__wordmark">Portal Base</span>
+                            <span class="auth__org">Andersen Consulting</span>
+                        </div>
+                    }
+                </div>
+                @Body
+            </div>
+            <p class="auth__note">Ambiente protegido · a autorização é sempre validada no servidor.</p>
+        </div>
+    </main>
+</div>
+
+@code {
+    private bool _temLogo;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Logo global configurável, com fallback RESILIENTE para a marca "D" (a tela de login nunca pode
+        // quebrar por indisponibilidade do catálogo).
+        try
+        {
+            _temLogo = await Marca.ObterResumoAsync() is not null; // UI-005: metadados, não a imagem
+        }
+        catch
+        {
+            _temLogo = false;
+        }
+    }
+}

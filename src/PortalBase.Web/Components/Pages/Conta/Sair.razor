@@ -1,0 +1,15 @@
+@page "/conta/sair"
+@layout LayoutEntrada
+
+<PageTitle>Sair · Portal Base</PageTitle>
+
+<h1 class="auth__title">Encerrar sessão</h1>
+<p class="auth__subtitle">Deseja sair do Portal Base? Sua sessão será revogada.</p>
+
+<form method="post" action="/conta/logout">
+    <AntiforgeryToken />
+    <div class="row gap-2">
+        <a class="btn btn-secondary flex-1 jc-center" href="/">Cancelar</a>
+        <button class="btn btn-danger flex-1" type="submit">Sair</button>
+    </div>
+</form>

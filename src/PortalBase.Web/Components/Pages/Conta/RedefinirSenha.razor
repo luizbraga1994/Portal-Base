@@ -1,0 +1,82 @@
+@page "/conta/redefinir-senha"
+@layout LayoutEntrada
+@using Microsoft.AspNetCore.DataProtection
+@using PortalBase.Application.Identidade
+@using PortalBase.Web.Seguranca
+@inject RecuperacaoSenha Recuperacao
+@inject IDataProtectionProvider ProtecaoDados
+@inject OpcoesRecuperacaoSenha OpcoesRecuperacao
+@inject NavigationManager Navegacao
+
+<PageTitle>Nova senha · Portal Base</PageTitle>
+
+<h1 class="auth__title">Criar uma nova senha</h1>
+
+@if (!_linkValido)
+{
+    <div class="alert alert-bad mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+        <div class="a-body">Este link é inválido, expirou ou já foi usado. Peça um novo em "Esqueci a senha".</div>
+    </div>
+    <p class="text-sm"><a href="/conta/esqueci-senha">Pedir um novo link</a> · <a href="/conta/entrar">Voltar para o login</a></p>
+}
+else
+{
+    @if (Erro == "diferentes")
+    {
+        <div class="alert alert-bad mb-4" role="alert">
+            <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+            <div class="a-body">A confirmação não é igual à nova senha.</div>
+        </div>
+    }
+    else if (Erro == "politica")
+    {
+        <div class="alert alert-bad mb-4" role="alert">
+            <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+            <div class="a-body">A nova senha não atende às regras abaixo.</div>
+        </div>
+    }
+
+    <form method="post" action="/conta/redefinir">
+        <AntiforgeryToken />
+        <div class="field">
+            <label for="novaSenha">Nova senha</label>
+            <input class="input" id="novaSenha" name="novaSenha" type="password" autocomplete="new-password"
+                   minlength="@PoliticaSenha.TamanhoMinimo" maxlength="@PoliticaSenha.TamanhoMaximo" autofocus required />
+        </div>
+        <div class="field">
+            <label for="confirmacao">Confirme a nova senha</label>
+            <input class="input" id="confirmacao" name="confirmacao" type="password" autocomplete="new-password"
+                   minlength="@PoliticaSenha.TamanhoMinimo" maxlength="@PoliticaSenha.TamanhoMaximo" required />
+        </div>
+        <RegrasSenha />
+        <button class="btn btn-primary w-full" type="submit">Salvar nova senha</button>
+    </form>
+}
+
+@code {
+    private bool _linkValido;
+
+    [CascadingParameter] private HttpContext? Contexto { get; set; }
+    [SupplyParameterFromQuery] public string? Token { get; set; }
+    [SupplyParameterFromQuery] public string? Erro { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Contexto is null)
+        {
+            return;
+        }
+
+        // Link do e-mail: o código vai para um cookie protegido e a página segue SEM ele na URL (regra 8).
+        if (!string.IsNullOrEmpty(Token))
+        {
+            CookieRedefinicaoSenha.Guardar(Contexto, ProtecaoDados, Token, OpcoesRecuperacao.Validade);
+            Navegacao.NavigateTo("/conta/redefinir-senha", replace: true);
+            return;
+        }
+
+        _linkValido = Erro != "link"
+            && await Recuperacao.LinkValidoAsync(CookieRedefinicaoSenha.Ler(Contexto, ProtecaoDados));
+    }
+}

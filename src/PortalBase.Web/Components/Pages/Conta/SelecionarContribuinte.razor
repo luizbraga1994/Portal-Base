@@ -1,0 +1,110 @@
+@page "/conta/selecionar"
+@layout LayoutEntrada
+@using System.Security.Claims
+@using PortalBase.Application.Autorizacao
+@using PortalBase.Application.Multitenancy
+@inject IConsultaAcessosUsuario Acessos
+@inject IAutorizacaoPlataforma Plataforma
+
+<PageTitle>Selecionar contribuinte · Portal Base</PageTitle>
+
+<h1 class="auth__title">Selecionar contribuinte</h1>
+<p class="auth__subtitle">Escolha o contribuinte com o qual deseja trabalhar nesta sessão.</p>
+
+@if (Erro is 1 or 2)
+{
+    <div class="alert alert-bad mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#9888;&#65039;</span>
+        <div class="a-body">
+            @(Erro == 2
+                ? "Não foi possível acessar este contribuinte. Verifique com o administrador do contribuinte."
+                : "Seleção inválida. Tente novamente.")
+        </div>
+    </div>
+}
+
+@if (_acessos.Count == 0 && _podeCadastrar)
+{
+    @* Instalação nova: o Administrador da plataforma cadastra o primeiro contribuinte (a tela abre sem contribuinte). *@
+    <div class="alert alert-info mb-4" role="status" id="sem-contribuintes-plataforma">
+        <span class="a-icon" aria-hidden="true">&#127970;</span>
+        <div class="a-body">Ainda não há contribuinte para escolher. Como Administrador da plataforma, cadastre o primeiro.</div>
+    </div>
+    <a class="btn btn-primary w-full jc-center mb-3" id="link-cadastrar-contribuinte" href="/admin/contribuintes">Cadastrar contribuinte</a>
+    <form method="post" action="/conta/logout">
+        <AntiforgeryToken />
+        <button type="submit" class="btn btn-secondary w-full">Sair</button>
+    </form>
+}
+else if (_acessos.Count == 0)
+{
+    <div class="alert alert-warn mb-4" role="alert">
+        <span class="a-icon" aria-hidden="true">&#127970;</span>
+        <div class="a-body">Seu usuário não está vinculado a nenhum contribuinte ativo. Fale com o administrador.</div>
+    </div>
+    <form method="post" action="/conta/logout">
+        <AntiforgeryToken />
+        <button type="submit" class="btn btn-secondary w-full">Sair</button>
+    </form>
+}
+else
+{
+    <form method="post" action="/conta/contribuinte">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+        <div class="field">
+            <label for="tenantId">Contribuinte</label>
+            <select class="select" id="tenantId" name="tenantId" required autofocus>
+                <option value="" disabled selected>Selecione um contribuinte…</option>
+                @foreach (var acesso in _acessos)
+                {
+                    <option value="@acesso.TenantId" disabled="@(!acesso.Operacional)">@TextoOpcao(acesso)</option>
+                }
+            </select>
+            <div class="help">
+                @_acessos.Count contribuinte(s) vinculado(s). Comece a digitar o nome para localizar na lista.
+            </div>
+        </div>
+        <button class="btn btn-primary w-full" type="submit">Entrar</button>
+    </form>
+    @if (_podeCadastrar)
+    {
+        <a class="btn btn-ghost w-full jc-center mt-3" id="link-cadastrar-contribuinte" href="/admin/contribuintes">Cadastrar novo contribuinte</a>
+    }
+}
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    [SupplyParameterFromQuery] public int Erro { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+
+    private IReadOnlyList<AcessoContribuinte> _acessos = [];
+    private bool _podeCadastrar;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var id = Http?.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (Guid.TryParse(id, out var usuarioId))
+        {
+            _acessos = await Acessos.ListarDoUsuarioAsync(usuarioId);
+        }
+
+        // Atalho para o Administrador da plataforma (decidido no servidor; a tela de destino reautoriza cada ação).
+        try
+        {
+            _podeCadastrar = (await Plataforma.AvaliarAsync(Permissoes.PlataformaTenantProvisionar)).Permitido;
+        }
+        catch (Exception excecao) when (excecao is not OperationCanceledException)
+        {
+            FalhasUi.Registrar(excecao);
+            _podeCadastrar = false; // fail-closed: sem o atalho
+        }
+    }
+
+    // O combobox mostra o NOME escolhido do tenant, sempre em maiúsculas (ex.: STAKE).
+    private static string TextoOpcao(AcessoContribuinte acesso)
+    {
+        var texto = acesso.Nome.ToUpperInvariant();
+        return acesso.Operacional ? texto : $"{texto} (indisponível)";
+    }
+}

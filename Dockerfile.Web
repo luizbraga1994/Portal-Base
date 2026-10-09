@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+# Imagem do host Web (Blazor Server). Multi-stage, runtime mínima, usuário não-root,
+# sem segredos embarcados (configuração via variáveis de ambiente/cofre).
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Restore em camada separada (cache): copia apenas os manifestos primeiro.
+COPY global.json Directory.Build.props Directory.Packages.props BannedSymbols.txt .editorconfig ./
+COPY src/PortalBase.Domain/PortalBase.Domain.csproj src/PortalBase.Domain/
+COPY src/PortalBase.Shared/PortalBase.Shared.csproj src/PortalBase.Shared/
+COPY src/PortalBase.Application/PortalBase.Application.csproj src/PortalBase.Application/
+COPY src/PortalBase.Infrastructure/PortalBase.Infrastructure.csproj src/PortalBase.Infrastructure/
+COPY src/PortalBase.Web/PortalBase.Web.csproj src/PortalBase.Web/
+RUN dotnet restore src/PortalBase.Web/PortalBase.Web.csproj
+
+COPY . .
+RUN dotnet publish src/PortalBase.Web/PortalBase.Web.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+# curl apenas para o HEALTHCHECK (instalado como root, antes de trocar de usuário).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/publish .
+
+# Reprodutibilidade da imagem (Prompt 53, Fase 7): a CI injeta versão/commit/timestamp por --build-arg.
+# Rótulos OCI padronizados + variáveis PORTALBASE_BUILD_* que o app reporta no startup. Nenhum segredo.
+ARG BUILD_VERSION=2.0.0
+ARG BUILD_SHA=desconhecido
+ARG BUILD_TIMESTAMP=desconhecido
+LABEL org.opencontainers.image.title="Portal Base Web" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.opencontainers.image.revision="${BUILD_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIMESTAMP}" \
+      org.opencontainers.image.source="https://github.com/luizbraga1994/Portal-Base"
+ENV PORTALBASE_BUILD_VERSION=${BUILD_VERSION} \
+    PORTALBASE_BUILD_SHA=${BUILD_SHA} \
+    PORTALBASE_BUILD_TIMESTAMP=${BUILD_TIMESTAMP} \
+    ASPNETCORE_HTTP_PORTS=8080
+EXPOSE 8080
+
+# Usuário não-root já definido na imagem base (.NET 8+).
+USER $APP_UID
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8080/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "PortalBase.Web.dll"]

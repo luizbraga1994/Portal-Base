@@ -1,0 +1,254 @@
+@page "/dados/arquivos"
+@rendermode InterativoSemPrerender
+@using Microsoft.AspNetCore.Components.Forms
+@using PortalBase.Application.Autorizacao
+@inject IDadosArquivos Dados
+@inject IDadosEnvioArquivo Envio
+@inject IAutorizacaoVisual Visual
+
+<PageTitle>Arquivos · Portal Base</PageTitle>
+
+<Breadcrumbs Itens="_migalhas" />
+<PageHeader Eyebrow="Dados" Titulo="Arquivos"
+            Subtitulo="Envio seguro de arquivos (conteúdo real conferido no servidor, antivírus, hash e área privada) e a lista dos recebidos. Apenas metadados — o conteúdo, o caminho e a referência de armazenamento nunca são expostos.">
+    <Acoes><button class="btn btn-secondary btn-sm" @onclick="Carregar" disabled="@_carregando">Atualizar</button></Acoes>
+</PageHeader>
+
+@if (!Visual.Pode(Permissoes.DadosVisualizar))
+{
+    <div class="card"><EmptyState Emoji="&#128683;" Titulo="Sem permissão"
+        Mensagem="Seu perfil não tem a permissão de visualização de dados (dados.visualizar).">
+        <Acao><a class="btn btn-primary" href="/">Voltar ao dashboard</a></Acao></EmptyState></div>
+}
+else
+{
+    <div class="card card-pad mb-4">
+        <div class="row gap-3 ai-center jc-between">
+            <h3 class="card-title">Enviar arquivo</h3>
+            <span class="badge badge-neutral"><span class="dot" aria-hidden="true"></span>Processado no servidor</span>
+        </div>
+
+        @if (!Visual.Pode(Permissoes.DadosImportar))
+        {
+            <div class="alert alert-info mt-3" role="note">
+                <span class="a-icon" aria-hidden="true">&#128274;</span>
+                <div class="a-body">
+                    Seu perfil pode <strong>visualizar</strong> os arquivos, mas não possui a permissão de
+                    <strong>importação</strong> (<span class="mono">dados.importar</span>). O envio é decidido pelo servidor.
+                </div>
+            </div>
+        }
+        else
+        {
+            <p class="text-sm text-muted mt-3 mtx-075">
+                Formatos aceitos: <strong>@_restricoes.ExtensoesRotulo</strong>. Tamanho máximo: <strong>@_restricoes.MaxTamanhoMb&nbsp;MB</strong>.
+                O tipo é conferido pelo <em>conteúdo real</em> no servidor (não pela extensão), com antivírus e verificação de integridade — a UI apenas facilita a seleção.
+            </p>
+
+            <div class="stack gap-3 mt-3">
+                <label class="fw-700 text-sm" for="arquivoEnvio">Arquivo</label>
+                <InputFile id="arquivoEnvio" OnChange="Selecionar" accept="@_restricoes.Accept" disabled="@_enviando" aria-describedby="arquivoAjuda" />
+                <span id="arquivoAjuda" class="text-muted text-sm">
+                    @if (_arquivo is { } sel)
+                    {
+                        <span>Selecionado: <strong>@sel.Name</strong> — @DadosUi.Tamanho(sel.Size)</span>
+                        @if (sel.Size > _restricoes.MaxTamanhoBytes)
+                        {
+                            <span class="text-bad"> · excede o limite de @_restricoes.MaxTamanhoMb MB</span>
+                        }
+                    }
+                    else
+                    {
+                        <span>Nenhum arquivo selecionado.</span>
+                    }
+                </span>
+
+                <div class="row gap-2">
+                    <button type="button" id="btn-enviar-arquivo" class="btn btn-primary" @onclick="EnviarAsync"
+                            disabled="@(_enviando || _arquivo is null || _arquivo.Size > _restricoes.MaxTamanhoBytes || _arquivo.Size == 0)">
+                        @if (_enviando)
+                        {
+                            <span class="spin" aria-hidden="true"></span>
+                            <span>Enviando…</span>
+                        }
+                        else
+                        {
+                            <span>Enviar</span>
+                        }
+                    </button>
+                </div>
+
+                @if (_resultado is { } r)
+                {
+                    <div id="resultado-envio" class="alert @ClasseAlerta(r.Estado)" role="@(r.Estado is EstadoEnvioUi.Ok or EstadoEnvioUi.Duplicado ? "status" : "alert")" aria-live="polite">
+                        <span class="a-icon" aria-hidden="true">@IconeAlerta(r.Estado)</span>
+                        <div>
+                            <div class="a-title">@r.Titulo</div>
+                            <div class="a-body">@r.Mensagem</div>
+                            @if (r.Estado is EstadoEnvioUi.MfaRequerida)
+                            {
+                                <div class="a-body mt-2"><a class="btn btn-secondary btn-sm" href="/conta/verificar?returnUrl=/dados/arquivos">Confirmar verificação (MFA)</a></div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="dt-wrap mb-4">
+        <div class="dt-toolbar wrap gap-2">
+            <FiltroPeriodo Rotulo="Enviado em" Desde="_desde" DesdeChanged="v => _desde = v" Ate="_ate" AteChanged="v => _ate = v" />
+            <FiltroSelect @bind-Valor="_estadoFiltro" Opcoes="OpcoesFiltro.EstadosArquivo" RotuloTodos="Todos os estados" AriaLabel="Estado do arquivo" Classe="mw-180" />
+            <FiltroSelect @bind-Valor="_scan" Opcoes="OpcoesFiltro.ResultadosScan" RotuloTodos="Todos os scans" AriaLabel="Resultado do scan" Classe="mw-170" />
+            <input class="input mw-120" type="text" maxlength="12" placeholder="Extensão"
+                   value="@_extensao" @oninput="e => _extensao = e.Value?.ToString() ?? string.Empty" aria-label="Extensão" />
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" @onclick="Limpar">Limpar</button>
+            <button class="btn btn-primary btn-sm" @onclick="Filtrar" disabled="@(!PeriodoUi.EhValido(_desde, _ate))">Filtrar</button>
+        </div>
+
+        <EstadoConsultaView Estado="_r?.Estado ?? EstadoConsultaUi.SemTenant" Carregando="_carregando"
+                            Vazio="_r is not null && _r.Itens.Count == 0"
+                            TituloVazio="Nenhum arquivo encontrado" MensagemVazio="Ajuste os filtros ou limpe a pesquisa.">
+            <div class="dt-scroll">
+                <table class="dt">
+                    <thead><tr><th>Nome</th><th>Extensão</th><th class="tnum">Tamanho</th><th>Hash</th><th>Estado</th><th>Scan</th><th>Enviado</th><th>Motivo</th></tr></thead>
+                    <tbody>
+                        @foreach (var a in _r!.Itens)
+                        {
+                            <tr>
+                                <td class="fw-700 text-sm">@a.Nome</td>
+                                <td class="text-sm mono">@(string.IsNullOrEmpty(a.Extensao) ? "—" : a.Extensao)</td>
+                                <td class="tnum">@a.TamanhoLegivel</td>
+                                <td class="text-sm mono" title="SHA-256 (parcial)">@a.HashCurto</td>
+                                <td><StatusBadge Texto="@a.Estado" Situacao="@a.EstadoBadge" /></td>
+                                <td><StatusBadge Texto="@a.Scan" Situacao="@a.ScanBadge" /></td>
+                                <td class="text-sm mono">@a.EnviadoEmUtc.ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture)</td>
+                                <td class="text-sm text-muted">@(string.IsNullOrWhiteSpace(a.MotivoRejeicao) ? "—" : a.MotivoRejeicao)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <Paginacao Pagina="_r.Pagina" TamanhoPagina="_r.TamanhoPagina" Total="_r.Total"
+                       Rotulo="arquivo(s)" OnAnterior="Anterior" OnProxima="Proxima" />
+        </EstadoConsultaView>
+    </div>
+}
+
+@code {
+    private static readonly IReadOnlyList<Migalha> _migalhas = [new Migalha("Dados"), new Migalha("Arquivos")];
+
+    private string _estadoFiltro = "Todos";
+    private string _scan = "Todos";
+    private string _extensao = string.Empty;
+    private DateTimeOffset? _desde;
+    private DateTimeOffset? _ate;
+    private int _pagina = 1;
+    private bool _carregando;
+    private ResultadoListaVm<RegistroArquivoVm>? _r;
+    private RestricoesEnvioVm _restricoes = new(20L * 1024 * 1024, []);
+    private IBrowserFile? _arquivo;
+    private bool _enviando;
+    private ResultadoEnvioVm? _resultado;
+
+    private int TotalPaginas => _r?.TotalPaginas ?? 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Visual.Pode(Permissoes.DadosVisualizar)) { return; }
+        _restricoes = Envio.Restricoes;
+        await Carregar();
+    }
+
+    private void Selecionar(InputFileChangeEventArgs e)
+    {
+        _arquivo = e.FileCount > 0 ? e.File : null;
+        _resultado = null; // nova seleção limpa o desfecho anterior.
+    }
+
+    private async Task EnviarAsync()
+    {
+        // Proteção de duplo-submit: só um envio em voo; entrada e botão ficam desabilitados enquanto processa.
+        if (_enviando || _arquivo is null) { return; }
+
+        // Pré-checagem de UX (o backend revalida sempre — não é a fronteira de segurança).
+        if (_arquivo.Size <= 0 || _arquivo.Size > _restricoes.MaxTamanhoBytes)
+        {
+            _resultado = new ResultadoEnvioVm(EstadoEnvioUi.Rejeitado, null, "Arquivo não enviado",
+                _arquivo.Size <= 0 ? "O arquivo está vazio." : $"O arquivo excede o limite de {_restricoes.MaxTamanhoMb} MB.");
+            return;
+        }
+
+        _enviando = true;
+        _resultado = null;
+        try
+        {
+            await using (var conteudo = _arquivo.OpenReadStream(_restricoes.MaxTamanhoBytes))
+            {
+                _resultado = await Envio.EnviarAsync(_arquivo.Name, conteudo);
+            }
+
+            if (_resultado.Estado is EstadoEnvioUi.Ok or EstadoEnvioUi.Duplicado)
+            {
+                _arquivo = null; // sucesso/idempotente: limpa a seleção para evitar reenvio acidental.
+            }
+        }
+        catch (IOException)
+        {
+            // OpenReadStream lança se o arquivo exceder o limite declarado — trata como rejeição de tamanho (UX).
+            _resultado = new ResultadoEnvioVm(EstadoEnvioUi.Rejeitado, null, "Arquivo não enviado",
+                $"O arquivo excede o limite de {_restricoes.MaxTamanhoMb} MB.");
+        }
+        finally
+        {
+            _enviando = false;
+        }
+
+        _pagina = 1;
+        await Carregar();
+    }
+
+    private static string ClasseAlerta(EstadoEnvioUi estado) => estado switch
+    {
+        EstadoEnvioUi.Ok => "alert-ok",
+        EstadoEnvioUi.Duplicado => "alert-info",
+        EstadoEnvioUi.MfaRequerida or EstadoEnvioUi.SemTenant => "alert-warn",
+        _ => "alert-bad",
+    };
+
+    private static string IconeAlerta(EstadoEnvioUi estado) => estado switch
+    {
+        EstadoEnvioUi.Ok => "✅",
+        EstadoEnvioUi.Duplicado => "ℹ️",
+        _ => "⚠️",
+    };
+
+    private async Task Filtrar() { _pagina = 1; await Carregar(); }
+
+    private async Task Limpar() { _estadoFiltro = _scan = "Todos"; _extensao = string.Empty; _desde = _ate = null; _pagina = 1; await Carregar(); }
+
+    private async Task Anterior() { if (_pagina > 1) { _pagina--; await Carregar(); } }
+
+    private async Task Proxima() { if (_pagina < TotalPaginas) { _pagina++; await Carregar(); } }
+
+    private async Task Carregar()
+    {
+        if (_carregando) { return; }
+        // Prompt 81: Desde > Até NÃO consulta (o FiltroPeriodo exibe a mensagem; o servidor também rejeita).
+        if (!PeriodoUi.EhValido(_desde, _ate)) { return; }
+        _carregando = true;
+        try
+        {
+            _r = await Dados.ConsultarAsync(new FiltroArquivosVm
+            {
+                Desde = _desde, Ate = _ate,
+                Estado = _estadoFiltro, ResultadoScan = _scan,
+                Extensao = string.IsNullOrWhiteSpace(_extensao) ? null : _extensao,
+                Pagina = _pagina, TamanhoPagina = 50,
+            });
+        }
+        finally { _carregando = false; }
+    }
+}

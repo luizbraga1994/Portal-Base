@@ -1,0 +1,26 @@
+@* Estado de uma integração/fonte (Prompt 38, §21). NUNCA infere estado sem informação do backend:
+   o valor "Indisponivel" é o padrão honesto quando o backend não fornece um estado. *@
+<span class="badge @_classe">
+    <span class="dot" aria-hidden="true"></span>@_rotulo
+</span>
+
+@code {
+    /// <summary>Estado: Ativa | Inativa | Incompleta | Processando | Erro | Indisponivel.</summary>
+    [Parameter] public string Estado { get; set; } = "Indisponivel";
+
+    private string _classe = "badge-neutral";
+    private string _rotulo = "Indisponível";
+
+    protected override void OnParametersSet()
+    {
+        (_classe, _rotulo) = Estado switch
+        {
+            "Ativa" => ("badge-ok", "Ativa"),
+            "Inativa" => ("badge-neutral", "Inativa"),
+            "Incompleta" => ("badge-warn", "Configuração incompleta"),
+            "Processando" => ("badge-warn", "Processando"),
+            "Erro" => ("badge-bad", "Erro"),
+            _ => ("badge-neutral", "Indisponível"),
+        };
+    }
+}

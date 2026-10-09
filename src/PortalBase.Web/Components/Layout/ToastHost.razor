@@ -1,0 +1,20 @@
+@* Host de notificações (toasts) — §46. Substitui alert() do navegador. *@
+@if (Notificacoes.Ativas.Count > 0)
+{
+    <div class="toast-host" aria-live="polite" aria-atomic="false">
+        @foreach (var n in Notificacoes.Ativas)
+        {
+            <div class="toast toast-@n.Tipo" role="status">
+                <span class="t-icon" aria-hidden="true">@IconeToast(n.Tipo)</span>
+                <div class="flex-1">
+                    <div class="t-title">@n.Titulo</div>
+                    @if (!string.IsNullOrEmpty(n.Mensagem))
+                    {
+                        <div class="t-body">@n.Mensagem</div>
+                    }
+                </div>
+                <button class="t-close" aria-label="Fechar" @onclick="() => Notificacoes.Remover(n.Id)">&times;</button>
+            </div>
+        }
+    </div>
+}

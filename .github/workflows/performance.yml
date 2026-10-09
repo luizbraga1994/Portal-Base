@@ -1,0 +1,140 @@
+name: Performance
+
+# Prompt 56/77 — estratégia de performance no CI (Fase 21/36):
+#   - harness-lint       : valida a SINTAXE do harness k6 (node --check) em todo push/PR — barato, sem k6.
+#   - smoke-performance  : leve, roda no push (baseline de latência de render Web via Playwright).
+#   - load-test (manual) : k6 contra um ambiente DEDICADO, só em workflow_dispatch (não pesa o PR).
+# Carga pesada (load/stress/soak) NUNCA roda automaticamente em PR — só manual, com alvo dedicado.
+
+# Economia de minutos: só no PR para o master (e manualmente) — não roda a cada push de branch.
+on:
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'URL de um ambiente DEDICADO de teste (nunca produção nem API externa real)'
+        required: false
+        default: ''
+      perfil:
+        description: 'Perfil k6: smoke | baseline | load | stress | soak | spike'
+        required: false
+        default: 'smoke'
+      vus:
+        description: '(Opcional) VUs constantes; requer duration'
+        required: false
+        default: ''
+      duration:
+        description: '(Opcional) Duração p/ VUs constantes (ex.: 5m)'
+        required: false
+        default: ''
+
+# Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_NOLOGO: 'true'
+
+jobs:
+  # Guardrail barato (Fase 21): garante que o harness k6 continua sintaticamente válido em todo PR/push,
+  # sem instalar k6 nem rodar carga. node --check só analisa a sintaxe (não resolve imports do k6).
+  harness-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validar sintaxe do harness k6
+        run: |
+          for f in perf/totp.js perf/datasets.js perf/load-test.js; do
+            echo "node --check $f"; node --check "$f"
+          done
+
+  smoke-performance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj -c Release -warnaserror
+
+      - name: Instalar navegador (Chromium)
+        run: pwsh tests/PortalBase.BrowserE2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      # Baseline de latência de render Web (sem MySQL — fail-closed/health). Números MEDIDOS.
+      - name: Smoke de performance (Playwright)
+        run: >
+          dotnet test tests/PortalBase.BrowserE2E.Tests/PortalBase.BrowserE2E.Tests.csproj
+          -c Release --no-build --filter "FullyQualifiedName~PerformanceSmoke"
+          --logger "trx;LogFileName=perf-smoke.trx" --results-directory artifacts/test-results
+
+      - name: Publicar baseline medido
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: performance-baseline
+          path: |
+            artifacts/e2e/perf-baseline.json
+            artifacts/test-results/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Carga HTTP com k6 — MANUAL. Requer um ambiente DEDICADO já em execução (base_url). Sem base_url,
+  # o job registra BLOCKED e não inventa carga. Nunca aponte para produção nem para API externa real. Credenciais e
+  # segredo de MFA (se autenticado) vêm de secrets do repositório/ambiente — NUNCA versionados aqui.
+  load-test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar alvo dedicado
+        run: |
+          if [ -z "${{ github.event.inputs.base_url }}" ]; then
+            echo "::warning::BLOCKED — nenhum ambiente dedicado (base_url) informado; carga não executada (não simulada)."
+            exit 0
+          fi
+          echo "Alvo: ${{ github.event.inputs.base_url }} | perfil: ${{ github.event.inputs.perfil }}"
+
+      - name: Instalar k6
+        if: ${{ github.event.inputs.base_url != '' }}
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update && sudo apt-get install -y k6
+
+      - name: Rodar k6
+        if: ${{ github.event.inputs.base_url != '' }}
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url }}
+          PERFIL: ${{ github.event.inputs.perfil }}
+          VUS: ${{ github.event.inputs.vus }}
+          DURATION: ${{ github.event.inputs.duration }}
+          # Credenciais de teste (opcionais) — de secrets, nunca hardcoded. Sem elas, carga só anônima.
+          LOAD_TEST_USER: ${{ secrets.LOAD_TEST_USER }}
+          LOAD_TEST_PASSWORD: ${{ secrets.LOAD_TEST_PASSWORD }}
+          LOAD_TEST_TENANT: ${{ secrets.LOAD_TEST_TENANT }}
+          LOAD_TEST_MFA_SECRET: ${{ secrets.LOAD_TEST_MFA_SECRET }}
+        run: k6 run perf/load-test.js   # handleSummary grava artifacts/k6-summary.json
+
+      - name: Publicar resultado k6
+        if: ${{ always() && github.event.inputs.base_url != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-summary
+          path: artifacts/k6-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
