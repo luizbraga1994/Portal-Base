@@ -10,14 +10,11 @@ name: Security
 # plataforma) — publicar resultado ≠ portão; os portões reais (exit-code do Trivy/gitleaks/SCA) continuam
 # hard-fail. Ver docs/SECURITY-CI.md (Fase 18/19/20).
 
+# CI automático DESLIGADO no template (limite de minutos do GitHub Actions): roda só à mão, em
+# Actions → Run workflow. Para ligar, acrescente os gatilhos push/pull_request da branch principal (main) —
+# ver docs/COMO-USAR-O-TEMPLATE.md, seção 6.
 on:
-  pull_request:
-    branches: [ master ]
-  push:
-    branches: [ master ]
   workflow_dispatch:
-  schedule:
-    - cron: '27 4 * * 1'   # segunda-feira, 04:27 UTC (varredura periódica de dependências/imagens)
 
 # Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).
 concurrency:

@@ -102,3 +102,22 @@ As fábricas de design (`*DbContextFactory`) leem `PORTALBASE_TENANT_DESIGNTIME_
 
 Siga [`CLAUDE.md`](../CLAUDE.md): as 8 etapas, as 10 perguntas de impacto, a auditoria da etapa 7, a Definition of
 Done e — sempre — `dotnet build -warnaserror` + `dotnet test`, reportando o resultado exato.
+
+## 6. CI (GitHub Actions)
+
+Os workflows de `.github/workflows` vêm **desligados**: rodam só à mão (Actions → escolha o workflow → **Run
+workflow**), sem gastar minutos do Actions sozinhos — nem em push, nem em PR, nem por agendamento. O *Dependency
+Review* do `security.yml` só existe em PR, então fica pulado enquanto o CI estiver desligado.
+
+Para ligar no portal novo, acrescente os gatilhos no bloco `on:` (o `ci.yml` valida cada push; os demais, os PRs):
+
+```yaml
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+```
+
+Use `pull_request: branches: [ main ]` nos workflows de PR (`browser-e2e`, `e2e-integrated`, `performance`,
+`script-ambiente-windows`, `security`) e, se quiser a varredura semanal de dependências, `schedule: - cron: '27 4 * * 1'`
+no `security.yml`.

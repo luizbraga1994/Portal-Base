@@ -9,16 +9,10 @@ name: Script de ambiente (Windows PowerShell 5.1)
 # Detalhes das verificações: scripts/ci/validar-configurar-ambiente-local.ps1.
 
 # Economia de minutos (o runner Windows conta em dobro): só no PR para o master (e manualmente).
+# CI automático DESLIGADO no template (limite de minutos do GitHub Actions): roda só à mão, em
+# Actions → Run workflow. Para ligar, acrescente os gatilhos push/pull_request da branch principal (main) —
+# ver docs/COMO-USAR-O-TEMPLATE.md, seção 6.
 on:
-  pull_request:
-    branches: [ master ]
-    paths:
-      - 'scripts/**'
-      - 'tools/**'
-      - 'src/PortalBase.Infrastructure/Persistencia/Catalogo/**'
-      - 'src/PortalBase.Infrastructure/Segredos/**'
-      - '.config/dotnet-tools.json'
-      - '.github/workflows/script-ambiente-windows.yml'
   workflow_dispatch:
 
 # Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).

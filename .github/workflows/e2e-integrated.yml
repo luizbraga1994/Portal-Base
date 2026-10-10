@@ -7,9 +7,10 @@ name: E2E Integrated
 # upload, backup/restauração) rodam dentro do mesmo `dotnet test` abaixo.
 
 # Economia de minutos: suíte pesada só no PR para o master (e manualmente) — não roda a cada push de branch.
+# CI automático DESLIGADO no template (limite de minutos do GitHub Actions): roda só à mão, em
+# Actions → Run workflow. Para ligar, acrescente os gatilhos push/pull_request da branch principal (main) —
+# ver docs/COMO-USAR-O-TEMPLATE.md, seção 6.
 on:
-  pull_request:
-    branches: [ master ]
   workflow_dispatch:
 
 # Limite de minutos do Actions: um push novo na mesma branch/PR cancela a execução anterior (o master nunca é cancelado).

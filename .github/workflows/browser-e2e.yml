@@ -5,9 +5,10 @@ name: Browser E2E
 # Não duplica o CI principal (build/test unitário/SCA): este roda apenas a suíte de navegador.
 
 # Economia de minutos: suíte pesada só no PR para o master (e manualmente) — não roda a cada push de branch.
+# CI automático DESLIGADO no template (limite de minutos do GitHub Actions): roda só à mão, em
+# Actions → Run workflow. Para ligar, acrescente os gatilhos push/pull_request da branch principal (main) —
+# ver docs/COMO-USAR-O-TEMPLATE.md, seção 6.
 on:
-  pull_request:
-    branches: [ master ]
   workflow_dispatch:
 
 # Menor privilégio (Prompt 52): o job só lê o repositório; nada de escrita.
